@@ -1,0 +1,714 @@
+.Main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+  position: relative;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.backgroundImage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: -1;
+}
+
+.heading {
+  color: #fff;
+  text-shadow: 4px 4px 14px rgba(0, 0, 0, 0.9);
+  font-size: 2.5rem;
+  align-self: start;
+  margin-bottom: 30px;
+  margin-left: 20px;
+}
+
+.form {
+  display: flex;
+  position: absolute;
+  top: 38px;
+  right: 45px;
+}
+
+.inputContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #aaa;
+  cursor: pointer;
+}
+
+.inputBox {
+  padding: 10px 15px 10px 38px;
+  border: 1px solid #ccc;
+  border-radius: 30px;
+  width: 190px;
+  box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+  font-size: 1rem;
+  margin-right: 3px;
+  transition: all 0.3s ease;
+}
+
+.inputBox:focus {
+  outline: none;
+  border-color: #4a90e2;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.loginBtn {
+  padding: 10px 20px;
+  background-color: #4a90e2;
+  color: white;
+  border-radius: 30px;
+  margin-left: 3px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background-color 0.3s ease;
+  text-decoration: none;
+}
+
+.loginBtn:hover {
+  background-color: rgb(82, 82, 230);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+}
+
+.weatherCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 30px;
+  border-radius: 20px;
+  width: 80%;
+  max-width: 800px;
+  text-align: center;
+  box-shadow: 0px 0px 30px rgba(227, 228, 237, 0.4);
+  background-size: cover;
+  background-position: center;
+  color: rgb(255, 255, 255);
+  margin-bottom: 20px;
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(225, 225, 225, 0.18);
+}
+
+.locName {
+  font-size: 2rem;
+  margin-bottom: 10px;
+  color: #fff;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.temp {
+  font-size: 2.5rem;
+  margin-bottom: 15px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.humidity,
+.windSpeed,
+.condition {
+  font-size: 1.2rem;
+  margin: 5px 0;
+  color: #f0f0f0;
+  text-shadow: 1px 1px 5px rgba(0, 0, 0, 0.4);
+}
+
+.weatherIcon {
+  width: 100px;
+  height: 100px;
+}
+
+.forecastContainer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 20px;
+  width: 100%;
+  max-width: 1200px;
+  margin-top: 30px;
+}
+
+.forecastCard {
+  background-color: rgba(255, 255, 255, 0.85);
+  padding: 15px;
+  border-radius: 20px;
+  text-align: center;
+  box-shadow: 0px 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.forecastCard img {
+  width: 50px;
+  height: 50px;
+}
+
+.date {
+  font-size: 1rem;
+  margin-bottom: 10px;
+  color: #333;
+}
+
+.maxTemp,
+.minTemp,
+.conditionText {
+  font-size: 1rem;
+  margin: 5px 0;
+  color: #454444;
+}
+
+.spinnerOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: rgba(0, 0, 0, 0.5);
+  z-index: 1000;
+  backdrop-filter: blur(5px);
+}
+
+.loader {
+  display: inline-block;
+  position: relative;
+  width: 80px;
+  height: 80px;
+}
+
+.loader div {
+  position: absolute;
+  top: 33px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fdfdfd;
+  animation-timing-function: cubic-bezier(0, 1, 1, 0);
+}
+
+.loader div:nth-child(1) {
+  left: 8px;
+  animation: flip1 0.6s infinite;
+}
+
+.loader div:nth-child(2) {
+  left: 8px;
+  animation: flip2 0.6s infinite;
+}
+
+.loader div:nth-child(3) {
+  left: 32px;
+  animation: flip2 0.6s infinite;
+}
+
+.loader div:nth-child(4) {
+  left: 56px;
+  animation: flip3 0.6s infinite;
+}
+
+@keyframes flip1 {
+  0% {
+    transform: scale(0);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes flip3 {
+  0% {
+    transform: scale(1);
+  }
+
+  100% {
+    transform: scale(0);
+  }
+}
+
+@keyframes flip2 {
+  0% {
+    transform: translate(0, 0);
+  }
+
+  100% {
+    transform: translate(24px, 0);
+  }
+}
+
+@media (max-width: 1024px) {
+  .forecastContainer {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .inputBox {
+    width: 200px;
+  }
+
+  .loginBtn {
+    padding: 8px 15px;
+    font-size: 1rem;
+  }
+
+  .weatherCard {
+    width: 90%;
+  }
+}
+
+@media (max-width: 768px) {
+  .heading {
+    font-size: 2.4rem;
+    margin-left: 10px;
+  }
+
+  .inputBox {
+    width: 190px;
+  }
+
+  .forecastContainer {
+    gap: 10px;
+  }
+}
+
+@media (max-width: 630px) {
+  .heading {
+    margin-left: 0;
+    margin-bottom: 15px;
+    font-size: 2rem;
+    align-self: center;
+  }
+
+  .form {
+    position: static;
+    margin-bottom: 20px;
+  }
+
+  .temp {
+    font-size: 2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .form {
+    position: static;
+    margin-bottom: 20px;
+  }
+
+  .heading {
+    margin-left: 0;
+    margin-bottom: 20px;
+    margin-top: 20px;
+    font-size: 2.2rem;
+    align-self: center;
+  }
+
+  .inputBox {
+    width: 180px;
+    margin-right: 0;
+  }
+
+  .loginBtn {
+    padding: 10px;
+    font-size: 1rem;
+  }
+}
+
+.modalOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(255, 255, 255, 0.2);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  backdrop-filter: blur(10px);
+}
+
+.modal {
+  background-color: #222;
+  padding: 30px;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  color: #fff;
+  text-align: center;
+}
+
+.modelHeading {
+  margin-bottom: 20px;
+  font-size: 1.5rem;
+}
+
+.modelBtn {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 30px;
+  background-color: #4a90e2;
+  margin-top: 10px;
+  color: white;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.modelBtn:hover {
+  background-color: rgb(82, 82, 230);
+}
+
+.accIcon {
+  font-size: 2.9rem;
+  margin-left: 10px;
+  color: #fff;
+  cursor: pointer;
+}
+
+.panel {
+  position: fixed;
+  top: 0;
+  right: -350px;
+  width: 320px;
+  height: 100%;
+  background-color: transparent;
+  transition: right 0.6s ease;
+  padding: 25px;
+  display: flex;
+  flex-direction: column;
+  z-index: 1000;
+  box-shadow: 0px 0px 30px rgba(227, 228, 237, 9);
+  background-size: cover;
+  background-position: center;
+  backdrop-filter: blur(10px);
+  border: 2px solid rgba(225, 225, 225, 0.1);
+}
+
+.panelOpen {
+  right: 0;
+}
+
+.accInfoContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-top: 15px;
+}
+
+.accInfo {
+  margin-top: 10px;
+}
+
+.accIconCenter {
+  font-size: 64px;
+}
+
+.accName {
+  text-align: center;
+  margin-top: 10px;
+  font-size: 18px;
+  color: #333;
+}
+
+.accHeader {
+  font-size: 28px;
+  font-weight: bold;
+  margin-top: 30px;
+  text-align: center;
+}
+
+.accContent {
+  font-size: 14px;
+  color: #555;
+  margin-top: 10px;
+  text-align: center;
+}
+
+.closeIcon {
+  font-size: 24px;
+  cursor: pointer;
+  position: absolute;
+  top: 15px;
+  right: 10px;
+  color: #333;
+}
+
+.logoutButton {
+  background-color: red;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s ease;
+  margin-bottom: 20px;
+  margin-top: 10px;
+}
+
+.logoutButton:hover {
+  background-color: darkred;
+}
+
+.logoutIcon {
+  font-size: 18px;
+  margin-left: 4px;
+}
+
+.favInputBox {
+  padding: 10px 15px 10px 15px;
+  border: 1px solid #ccc;
+  border-radius: 30px;
+  width: 209px;
+  margin-top: 15px;
+  box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+  font-size: 1rem;
+  transition: all 0.3s ease;
+}
+
+.favInputBox:focus {
+  outline: none;
+  border-color: #4a90e2;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.2);
+}
+
+.userPageButton {
+  background-color: #4a90e2;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 15px;
+  cursor: pointer;
+  width: 100%;
+  transition: background-color 0.3s ease;
+  margin-top: 8px;
+}
+
+.userPageButton:hover {
+  background-color: #0667cf
+}
+
+.favLocDesc {
+  margin-top: 13px;
+  margin-bottom: 10px;
+}
+
+.plusIcon {
+  font-size: 14px;
+  margin-right: 4px;
+}
+
+.favAddButton {
+  background-color: #4a90e2;
+  color: white;
+  padding: 10px 20px;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  display: flex;
+  width: 100%;
+  text-align: center;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.3s ease;
+  margin-top: 15px;
+}
+
+.favAddButton:hover {
+  background-color: #0667cf;
+}
+
+.favoriteLocationSection {
+  color: #fff;
+
+  button {
+    color: #fff;
+  }
+}
+
+.favoriteLocationList {
+  width: 100%;
+  max-width: 400px;
+  margin: 20px auto;
+  font-family: Arial, sans-serif;
+}
+
+.favoriteLocationHeader {
+  display: flex;
+  padding: 10px 0;
+  width: 100%;
+  border-bottom: 2px solid #aaa;
+  font-size: 18px;
+  font-weight: bold;
+  text-align: center;
+  justify-content: space-between;
+}
+
+.favoriteLocationItem {
+  display: flex;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid #ccc;
+  font-size: 16px;
+}
+
+.favoriteLocationItem button {
+  flex: 0.3;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+
+.favoriteLocationItem div {
+  flex: 0.4;
+  text-align: center;
+}
+
+.deleteIcon {
+  color: red;
+  font-size: 18px;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.deleteIcon:hover {
+  transform: scale(1.3);
+}
+
+.favoriteLocationItem div:last-child {
+  flex: 0.3;
+  text-align: center;
+}
+
+.newFavoriteContainer {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  outline: none;
+}
+
+.favLocAdd {
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  width: 100%;
+  margin-right: 5px;
+}
+
+.favTempAdd {
+  padding: 8px;
+  font-size: 14px;
+  border: 1px solid #ccc;
+  border-radius: 10px;
+  width: 125px;
+}
+
+.favLocRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.infoIcon {
+  color: #fff;
+  font-size: 30px;
+  cursor: pointer;
+  margin: 0 5px;
+}
+
+.infoModal {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: fixed;
+  z-index: 1000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.6);
+  animation: fadeIn 0.5s ease-in-out;
+}
+
+.infoModalContent {
+  background-color: #fff;
+  padding: 40px;
+  border-radius: 15px;
+  width: 80%;
+  max-width: 600px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  animation: slideIn 0.5s ease-in-out;
+  position: relative;
+  font-size: 18px;
+  line-height: 1.6;
+  color: #333;
+  margin-top: 20px;
+}
+
+.closeButton {
+  color: #333;
+  font-size: 28px;
+  font-weight: bold;
+  position: absolute;
+  top: 10px;
+  right: 15px;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+
+.closeButton:hover,
+.closeButton:focus {
+  color: #000;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-30%);
+  }
+
+  to {
+    transform: translateY(0);
+  }
+}
+
+.infoLogin {
+  color: #007bff;
+  text-decoration: none;
+}
