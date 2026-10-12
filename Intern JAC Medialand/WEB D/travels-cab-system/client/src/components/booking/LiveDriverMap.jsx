@@ -108,7 +108,7 @@ const LiveDriverMap = ({ driverId, pickup, destination, status = "Scheduled" }) 
       if (!driverId) { await drawStatic(); return; }
       try {
         const token = localStorage.getItem("travels_token");
-        const base = (import.meta.env.VITE_API_URL || "http://localhost:5000/api").replace(/\/$/, "");
+        const base = (import.meta.env.VITE_API_URL || "https://travels-cab-backend.onrender.com/api").replace(/\/$/, "");
         const response = await fetch(`${base}/driver-location/driver/${driverId}`, { headers: { Authorization: `Bearer ${token}` } });
         if (!response.ok) return drawStatic();
         const data = await response.json();

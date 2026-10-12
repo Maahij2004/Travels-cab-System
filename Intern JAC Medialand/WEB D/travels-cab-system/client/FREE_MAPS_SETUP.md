@@ -12,7 +12,7 @@ This client no longer requires Google Maps, a Google Maps API key, or Google bil
 Only the backend API URL is required:
 
 ```env
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL=https://travels-cab-backend.onrender.com/api
 ```
 
 No Google Maps key is required.

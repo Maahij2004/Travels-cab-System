@@ -8,7 +8,7 @@ The frontend now runs as four separate Vite development hosts while sharing the 
 | Customer | http://localhost:5175 | customer | Customer login, registration and booking |
 | Driver | http://localhost:5177 | driver | Driver login and assigned-trip operations |
 | Admin | http://localhost:5179 | admin | Admin/Super Admin control center |
-| Backend | http://localhost:5000 | Express | Shared API |
+| Backend | https://travels-cab-backend.onrender.com | Express | Shared API |
 
 ## Start separately
 
@@ -39,7 +39,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 - `5179` accepts admin and superadmin accounts only.
 - A customer cannot use the driver/admin portal to reach a dashboard.
 - Driver and Admin do not get customer self-registration.
-- All portals use the same backend at `http://localhost:5000/api`.
+- All portals use the same backend at `https://travels-cab-backend.onrender.com/api`.
 
 ## Production
 

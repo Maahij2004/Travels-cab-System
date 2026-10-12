@@ -20,8 +20,8 @@ npm.cmd run build
 Copy `.env.example` to `.env` and add your Google Maps browser key.
 
 ```env
-VITE_API_URL=http://localhost:5000/api
-VITE_API_URL=http://localhost:5000/api
+VITE_API_URL=https://travels-cab-backend.onrender.com/api
+VITE_API_URL=https://travels-cab-backend.onrender.com/api
 ```
 
 See `GOOGLE_MAPS_SETUP.md` for Google Cloud configuration.
