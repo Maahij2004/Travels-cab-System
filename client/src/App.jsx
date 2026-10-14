@@ -1,5 +1,4 @@
-import { Route, Routes, Navigate } from "react-router-dom";
-import HomePage from "./pages/HomePage";
+import { Route, Routes } from "react-router-dom";
 import Login from "./pages/auth/Login";
 import Register from "./pages/auth/Register";
 import CustomerDashboard from "./pages/customer/CustomerDashboard";
@@ -24,7 +23,7 @@ const Unauthorized = () => (
       <span className="section-label">TRAVELS CAB</span>
       <h1>Access restricted.</h1>
       <p>Your account does not have permission to open this portal.</p>
-      <a className="auth-submit simple-link" href="http://localhost:5173/">Choose another portal</a>
+      <a className="auth-submit simple-link" href="/">Choose another portal</a>
     </div>
   </main>
 );
@@ -60,7 +59,13 @@ function App() {
     return (
       <Routes>
         <Route path="/" element={<RoleSelector />} />
+        <Route path="/customer" element={<RoleLanding role="customer" />} />
+        <Route path="/driver" element={<RoleLanding role="driver" />} />
+        <Route path="/admin" element={<RoleLanding role="admin" />} />
+        <Route path="/login" element={<RoleSelector />} />
+        <Route path="/register" element={<Register />} />
         <Route path="/shared-trip/:token" element={<SharedTrip />} />
+        <Route path="/unauthorized" element={<Unauthorized />} />
         <Route path="*" element={<RoleSelector />} />
       </Routes>
     );
@@ -73,30 +78,9 @@ function App() {
       <Route path="/" element={<RoleLanding role={PORTAL_ROLE} />} />
       <Route path="/login" element={<Login />} />
       {PORTAL_ROLE === "customer" && <Route path="/register" element={<Register />} />}
-      <Route
-        path="/customer/*"
-        element={
-          <ProtectedRoute allowedRoles={config.roles}>
-            <CustomerDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/driver/*"
-        element={
-          <ProtectedRoute allowedRoles={config.roles}>
-            <DriverDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/*"
-        element={
-          <ProtectedRoute allowedRoles={config.roles}>
-            <AdminDashboard />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/customer/*" element={<ProtectedRoute allowedRoles={config.roles}><CustomerDashboard /></ProtectedRoute>} />
+      <Route path="/driver/*" element={<ProtectedRoute allowedRoles={config.roles}><DriverDashboard /></ProtectedRoute>} />
+      <Route path="/admin/*" element={<ProtectedRoute allowedRoles={config.roles}><AdminDashboard /></ProtectedRoute>} />
       <Route path="/shared-trip/:token" element={<SharedTrip />} />
       <Route path="/unauthorized" element={<Unauthorized />} />
       <Route path="*" element={<NotFound />} />

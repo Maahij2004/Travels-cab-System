@@ -6,21 +6,21 @@ const portals = [
     title: "Customer",
     description: "Book rides, view fares, track your driver and manage trips.",
     icon: CarFront,
-    url: import.meta.env.VITE_CUSTOMER_PORTAL_URL || "http://localhost:5175",
+    url: "/customer",
   },
   {
     role: "driver",
     title: "Driver",
     description: "View assigned trips, verify OTP, share GPS and update trip status.",
     icon: Users,
-    url: import.meta.env.VITE_DRIVER_PORTAL_URL || "http://localhost:5177",
+    url: "/driver",
   },
   {
     role: "admin",
     title: "Admin",
     description: "Manage customers, drivers, vehicles, bookings, pricing and reports.",
     icon: ShieldCheck,
-    url: import.meta.env.VITE_ADMIN_PORTAL_URL || "http://localhost:5179",
+    url: "/admin",
   },
 ];
 
@@ -35,7 +35,7 @@ export default function RoleSelector() {
           </div>
           <span className="section-label">SECURE PORTAL ACCESS</span>
           <h1>Who are you logging in as?</h1>
-          <p>Choose your dedicated Travels Cab portal. Each role runs on its own application host.</p>
+          <p>Choose your Travels Cab portal. Customer, Driver and Admin are available in this application.</p>
         </div>
 
         <div className="portal-grid">
@@ -53,9 +53,9 @@ export default function RoleSelector() {
         </div>
 
         <div className="portal-host-row">
-          <span>Customer · 5175</span>
-          <span>Driver · 5177</span>
-          <span>Admin · 5179</span>
+          <span>Customer · /customer</span>
+          <span>Driver · /driver</span>
+          <span>Admin · /admin</span>
         </div>
       </section>
     </main>

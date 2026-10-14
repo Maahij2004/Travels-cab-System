@@ -9,13 +9,13 @@
     "dev:customer": "vite --mode customer",
     "dev:driver": "vite --mode driver",
     "dev:admin": "vite --mode admin",
-    "build": "vite build --mode customer",
+    "build": "vite build --mode portal",
     "build:portal": "vite build --mode portal",
     "build:customer": "vite build --mode customer",
     "build:driver": "vite build --mode driver",
     "build:admin": "vite build --mode admin",
     "lint": "eslint .",
-    "preview": "vite preview --mode customer"
+    "preview": "vite preview --mode portal"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",
