@@ -27,11 +27,34 @@ const ratingSchema = new mongoose.Schema(
             required: true,
         },
 
+        vehicle: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Vehicle",
+            required: false,
+            default: null,
+        },
+
+        // Legacy `rating` is kept as the driver rating so existing admin
+        // reports and driver-rating queries continue to work.
         rating: {
             type: Number,
             required: true,
             min: 1,
             max: 5,
+        },
+
+        driverRating: {
+            type: Number,
+            min: 1,
+            max: 5,
+            default: null,
+        },
+
+        vehicleRating: {
+            type: Number,
+            min: 1,
+            max: 5,
+            default: null,
         },
 
         review: {

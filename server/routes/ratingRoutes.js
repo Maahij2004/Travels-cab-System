@@ -4,6 +4,7 @@ const {
     createRating,
     getDriverRatings,
     getMyTripRating,
+    getAllRatings,
 } = require("../controllers/ratingController");
 
 const { protect } = require("../middleware/authMiddleware");
@@ -38,6 +39,16 @@ router.get(
 // ==========================================
 // VIEW DRIVER RATINGS
 // ==========================================
+// ==========================================
+// ADMIN - VIEW ALL CUSTOMER RATINGS
+// ==========================================
+router.get(
+    "/admin/all",
+    protect,
+    authorizeRoles("admin", "superadmin"),
+    getAllRatings
+);
+
 router.get(
     "/driver/:driverId",
     protect,

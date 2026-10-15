@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, Clock3, CreditCard, LogOut, MessageCircle, Navigation, Phone, RefreshCw, Receipt, Send, Share2, ShieldAlert, Star, Wallet, X } from "lucide-react";
+import { CalendarDays, CheckCircle2, Clock3, CreditCard, LogOut, MessageCircle, Navigation, Phone, RefreshCw, Receipt, Send, Share2, ShieldAlert, ShieldCheck, LockKeyhole, Star, Wallet, X, AlertTriangle, Gift } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
 import ExactLocationPicker from "../../components/booking/ExactLocationPicker";
@@ -31,6 +31,8 @@ const CustomerDashboard = () => {
   const [error, setError] = useState("");
   const [rating, setRating] = useState({});
   const [ratingLoading, setRatingLoading] = useState(false);
+  const [ratingModalTripId, setRatingModalTripId] = useState(null);
+  const [vehicleRating, setVehicleRating] = useState({});
   const [paymentMethod, setPaymentMethod] = useState("Cash");
   const [supportText, setSupportText] = useState("");
   const [sosText, setSosText] = useState("");
@@ -41,6 +43,18 @@ const CustomerDashboard = () => {
   const [fareModalOpen, setFareModalOpen] = useState(false);
   const [dismissedFareTripId, setDismissedFareTripId] = useState(null);
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
+  const [rideGuardIncidents, setRideGuardIncidents] = useState([]);
+  const [rideGuardBookingId, setRideGuardBookingId] = useState("");
+  const [rideGuardType, setRideGuardType] = useState("driver_not_moving");
+  const [rideGuardDescription, setRideGuardDescription] = useState("");
+  const [rideGuardAmount, setRideGuardAmount] = useState("");
+  const [rideGuardSubmitting, setRideGuardSubmitting] = useState(false);
+  const [paymentProtection, setPaymentProtection] = useState({});
+  const [fareTransparency, setFareTransparency] = useState(null);
+  const [cancelModalBooking, setCancelModalBooking] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelDetails, setCancelDetails] = useState("");
+  const [cancelSubmitting, setCancelSubmitting] = useState(false);
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
@@ -68,13 +82,15 @@ const CustomerDashboard = () => {
     let alive = true;
     const refreshTripStatus = async () => {
       try {
-        const [bookingResponse, tripResponse] = await Promise.all([
+        const [bookingResponse, tripResponse, paymentsResponse] = await Promise.all([
           api.get("/bookings/my"),
           api.get("/trips/customer/my"),
+          api.get("/payments/my"),
         ]);
         if (!alive) return;
         setBookings(bookingResponse.data.bookings || []);
         setTrips(tripResponse.data.trips || []);
+        setPayments(paymentsResponse.data.payments || []);
       } catch {
         // Background polling should not disrupt the current screen.
       }
@@ -137,8 +153,72 @@ const CustomerDashboard = () => {
 
   useEffect(() => { loadCore(); }, [loadCore]);
   useEffect(() => { if (trips.length) loadTripRatings(trips); }, [trips, loadTripRatings]);
+
+  useEffect(() => {
+    if (ratingModalTripId) return;
+    const eligibleTrip = trips.find((trip) => {
+      if (trip.status !== "Completed") return false;
+      const payment = payments.find((item) => String(item.trip?._id || item.trip) === String(trip._id));
+      const alreadyRated = Boolean(rating[trip._id]?.existing);
+      const alreadySkipped = sessionStorage.getItem(`travels_rating_submitted_${trip._id}`) === "1";
+      return payment?.status === "Paid" && !alreadyRated && !alreadySkipped;
+    });
+    if (eligibleTrip) {
+      setRatingModalTripId(eligibleTrip._id);
+      setRating((current) => ({ ...current, [eligibleTrip._id]: { ...current[eligibleTrip._id], score: current[eligibleTrip._id]?.score || 0, review: current[eligibleTrip._id]?.review || "" } }));
+      setVehicleRating((current) => ({ ...current, [eligibleTrip._id]: current[eligibleTrip._id] || 0 }));
+    }
+  }, [trips, payments, rating, ratingModalTripId]);
   useEffect(() => { const draft = sessionStorage.getItem("travels_booking_draft"); if (draft) { try { setForm((current) => ({ ...current, ...JSON.parse(draft) })); } catch { sessionStorage.removeItem("travels_booking_draft"); } } }, []);
-  useEffect(() => { if (tab === "payments") loadFinance(); if (tab === "support") loadSupport(); }, [tab, loadFinance, loadSupport]);
+  const loadPaymentProtection = useCallback(async (tripList = trips) => {
+    const eligible = tripList.filter((trip) => ["Destination Reached", "Completed"].includes(trip.status));
+    const results = await Promise.all(eligible.slice(0, 10).map(async (trip) => {
+      try {
+        const response = await api.get(`/rideguard/payment-protection/${trip._id}`);
+        return [trip._id, response.data.protection];
+      } catch {
+        return [trip._id, null];
+      }
+    }));
+    setPaymentProtection((current) => ({ ...current, ...Object.fromEntries(results.filter(([, value]) => value)) }));
+  }, [trips]);
+
+  const loadRideGuard = useCallback(async () => {
+    try {
+      const incidentResponse = await api.get("/rideguard/incidents/my");
+      setRideGuardIncidents(incidentResponse.data.incidents || []);
+    } catch {
+      // Keep the RideGuard page usable even when an older backend is missing an optional endpoint.
+      setRideGuardIncidents([]);
+    }
+    const preferred = bookings.find((b) => !["Completed", "Cancelled"].includes(b.status)) || bookings[0];
+    if (preferred?._id) {
+      try {
+        const fareResponse = await api.get(`/rideguard/fare-transparency/${preferred._id}`);
+        setFareTransparency(fareResponse.data.transparency || null);
+      } catch {
+        setFareTransparency(null);
+      }
+    } else setFareTransparency(null);
+  }, [bookings]);
+
+  const submitRideGuard = async () => {
+    if (!rideGuardBookingId) return setError("Select a booking first.");
+    if (rideGuardType === "extra_fare" && (!rideGuardAmount || Number(rideGuardAmount) < 0)) return setError("Enter the extra fare amount requested.");
+    setRideGuardSubmitting(true);
+    try {
+      const response = await api.post("/rideguard/incidents", { bookingId: rideGuardBookingId, type: rideGuardType, description: rideGuardDescription, requestedAmount: rideGuardType === "extra_fare" ? Number(rideGuardAmount) : undefined });
+      setMessage(response.data.autoRescue ? "RideGuard activated Auto Rescue. We are finding another driver." : "RideGuard report submitted successfully.");
+      setRideGuardDescription(""); setRideGuardAmount(""); await loadCore(); await loadRideGuard();
+    } catch (err) { setError(err.response?.data?.message || "Unable to submit RideGuard report."); }
+    finally { setRideGuardSubmitting(false); }
+  };
+
+  useEffect(() => {
+    if (tab === "payments") { loadFinance(); loadPaymentProtection(trips); }
+    if (tab === "support") loadSupport();
+    if (tab === "rideguard") { loadRideGuard(); loadPaymentProtection(trips); }
+  }, [tab, loadFinance, loadSupport, loadRideGuard, loadPaymentProtection, trips]);
 
   useEffect(() => {
     if (!form.pickupPlace || !form.dropPlace) { setRoute(null); update("distanceKm", ""); update("distanceKmExact", ""); return undefined; }
@@ -184,9 +264,14 @@ const CustomerDashboard = () => {
     } catch (err) { setError(err.response?.data?.message || "Unable to create booking."); } finally { setSubmitting(false); }
   };
 
-  const cancelBooking = async (id) => {
-    if (!window.confirm("Cancel this booking?")) return;
-    try { await api.patch(`/bookings/${id}/cancel`, { reason: "Cancelled by customer" }); setMessage("Booking cancelled successfully."); await loadCore(); } catch (err) { setError(err.response?.data?.message || "Unable to cancel booking."); }
+  const openCancelModal = (booking) => { setCancelModalBooking(booking); setCancelReason(""); setCancelDetails(""); setError(""); };
+  const closeCancelModal = () => { if (cancelSubmitting) return; setCancelModalBooking(null); setCancelReason(""); setCancelDetails(""); };
+  const cancelBooking = async () => {
+    if (!cancelModalBooking || !cancelReason) return;
+    setCancelSubmitting(true);
+    try { const reasonText = cancelDetails.trim() ? `${cancelReason}: ${cancelDetails.trim()}` : cancelReason; await api.patch(`/bookings/${cancelModalBooking._id}/cancel`, { reason: reasonText }); setMessage("Booking cancelled successfully."); setCancelModalBooking(null); await loadCore(); }
+    catch (err) { setError(err.response?.data?.message || "Unable to cancel booking."); }
+    finally { setCancelSubmitting(false); }
   };
 
   const createPayment = async (tripId) => {
@@ -245,13 +330,26 @@ const CustomerDashboard = () => {
   };
 
   const rateTrip = async (tripId) => {
-    const value = Number(rating[tripId]?.score || 0); if (!value) return setError("Choose a rating from 1 to 5.");
+    const driverScore = Number(rating[tripId]?.score || 0);
+    const vehicleScore = Number(vehicleRating[tripId] || 0);
+    if (!driverScore || !vehicleScore) return setError("Please rate both the driver and the vehicle.");
+    setRatingLoading(true);
+    setError("");
     try {
-      const response = await api.post("/ratings", { tripId, rating: value, review: rating[tripId]?.review || "" });
+      const response = await api.post("/ratings", {
+        tripId,
+        rating: driverScore,
+        driverRating: driverScore,
+        vehicleRating: vehicleScore,
+        review: rating[tripId]?.review || "",
+      });
       const existing = response.data.rating || response.data;
       setRating((current) => ({ ...current, [tripId]: { ...current[tripId], existing } }));
-      setMessage("Thanks for rating your driver.");
+      setRatingModalTripId(null);
+      sessionStorage.setItem(`travels_rating_submitted_${tripId}`, "1");
+      setMessage("Thanks for rating your driver and vehicle.");
     } catch (err) { setError(err.response?.data?.message || "Unable to submit rating."); }
+    finally { setRatingLoading(false); }
   };
 
   const createTicket = async () => { if (!supportText.trim()) return; try { await api.post("/support", { subject: "Customer support", description: supportText.trim() }); setSupportText(""); setMessage("Support ticket created."); await loadSupport(); } catch (err) { setError(err.response?.data?.message || "Unable to create ticket."); } };
@@ -302,7 +400,7 @@ const CustomerDashboard = () => {
     return () => { alive = false; window.clearInterval(timer); };
   }, [activeTripId, activeTripStatus]);
 
-  const tabs = [["book", "Book a ride"], ["history", "Trips"], ["payments", "Payments"], ["support", "Support"], ["safety", "Safety"]];
+  const tabs = [["book", "Book a ride"], ["history", "Trips"], ["payments", "Payments"], ["rideguard", "RideGuard 🛡️"], ["support", "Support"], ["safety", "Safety"]];
 
   return (
     <main className="dashboard-page customer-dashboard">
@@ -366,21 +464,19 @@ const CustomerDashboard = () => {
       {tab === "history" && <section className="dashboard-card trip-history-card"><div className="card-heading"><div><span className="section-label">YOUR TRIPS</span><h2>Booking & trip history</h2><p className="trip-history-subtitle">Track your rides, follow live dispatch and keep every journey in one place.</p></div><button className="icon-button" onClick={loadCore} title="Refresh"><RefreshCw size={16} /></button></div>
       {(activeTrip || bookings[0]) && (
         <RedTaxiDispatchTracker trip={activeTrip} booking={bookings.find(b => !["Completed", "Cancelled"].includes(b.status)) || bookings[0]} pickupOtp={pickupOtp} onSosTrigger={triggerSOS} />
-      )}<div className="booking-list">{bookings.map((booking) => <article className="booking-row" key={booking._id}><div><strong>{booking.bookingId || booking._id.slice(-6).toUpperCase()}</strong><span>{booking.pickupLocation} → {booking.dropLocation}</span><small>{booking.travelDate} · {booking.travelTime} · {booking.status === "Pending" ? "Searching for nearby driver…" : booking.status}</small></div><div className="booking-row-side"><strong>₹{Number(booking.estimatedFare || 0).toLocaleString("en-IN")}</strong>{cancellable.includes(booking.status) && <button className="text-button" onClick={() => cancelBooking(booking._id)}>Cancel</button>}</div></article>)}</div>{trips.map((trip) => {
+      )}<div className="booking-list">{bookings.map((booking) => <article className="booking-row" key={booking._id}><div><strong>{booking.bookingId || booking._id.slice(-6).toUpperCase()}</strong><span>{booking.pickupLocation} → {booking.dropLocation}</span><small>{booking.travelDate} · {booking.travelTime} · {booking.status === "Pending" ? "Searching for nearby driver…" : booking.status}</small></div><div className="booking-row-side"><strong>₹{Number(booking.estimatedFare || 0).toLocaleString("en-IN")}</strong>{cancellable.includes(booking.status) && <button className="text-button" onClick={() => openCancelModal(booking)}>Cancel</button>}</div></article>)}</div>{trips.map((trip) => {
           if (trip.status !== "Completed") return null;
-          const driverName = trip.driver?.name || trip.driver?.user?.name || "Driver";
           const existing = rating[trip._id]?.existing;
-          const score = Number(existing?.rating || rating[trip._id]?.score || 0);
+          const driverScore = Number(existing?.driverRating || existing?.rating || 0);
+          const carScore = Number(existing?.vehicleRating || 0);
           return (
             <article className="trip-completion enhanced-trip-rating" key={trip._id}>
               <div className="trip-driver-summary">
                 <div className="driver-avatar">👤</div>
-                <div><span className="section-label">DRIVER</span><strong>{driverName}</strong><p>{trip.booking?.bookingId || "Completed trip"} · Trip completed</p></div>
+                <div><span className="section-label">COMPLETED RIDE</span><strong>{trip.driver?.name || trip.driver?.user?.name || "Driver"}</strong><p>{trip.booking?.bookingId || "Completed trip"} · Payment successful</p></div>
               </div>
               <div className="trip-rating-area">
-                <div className="rating-title">{existing ? "Your rating" : "Rate your driver"}</div>
-                <div className="rating-control" aria-label="Driver rating">{[1,2,3,4,5].map((star) => <button key={star} type="button" className={score >= star ? "selected" : ""} disabled={Boolean(existing)} onClick={() => setRating((r) => ({ ...r, [trip._id]: { ...r[trip._id], score: star } }))}><Star size={18} fill="currentColor" /></button>)}</div>
-                {existing ? <span className="rating-saved">⭐ {existing.rating}/5 · Thank you for rating</span> : <div className="rating-actions"><input value={rating[trip._id]?.review || ""} onChange={(e) => setRating((r) => ({ ...r, [trip._id]: { ...r[trip._id], review: e.target.value } }))} placeholder="Optional review" maxLength={1000} /><button className="dashboard-primary compact" onClick={() => rateTrip(trip._id)} disabled={ratingLoading}>Submit rating</button></div>}
+                {existing ? <span className="rating-saved">⭐ Driver {driverScore}/5 · 🚕 Vehicle {carScore || "—"}/5 · Thank you for rating</span> : <span className="rating-saved">⭐ Rating popup appears after successful payment</span>}
                 <button className="text-button" onClick={() => shareTrip(trip._id)}><Share2 size={14} /> Share trip</button>
               </div>
             </article>
@@ -389,6 +485,13 @@ const CustomerDashboard = () => {
 
       {tab === "payments" && <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">PAYMENTS & INVOICES</span><h2>Travel payments</h2></div><Wallet size={20} /></div><div className="payment-actions">{trips.filter((trip) => trip.status === "Destination Reached").map((trip) => <div className="payment-card" key={trip._id}><div><strong>{trip.booking?.bookingId || "Completed trip"}</strong><span>₹{Number(trip.finalFare || trip.estimatedFare || 0).toLocaleString("en-IN")}</span></div><select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}><option>Cash</option><option>UPI</option><option>Card</option><option>Wallet</option></select><button className="dashboard-primary compact" onClick={() => createPayment(trip._id)}>Pay now</button></div>)}</div><h3 className="subheading">Payment history</h3><div className="booking-list">{payments.map((payment) => <article className="booking-row" key={payment._id}><div><strong>{payment.paymentId || payment._id.slice(-8)}</strong><span>{payment.method}</span></div><div className="booking-row-side"><strong>₹{Number(payment.amount || 0).toLocaleString("en-IN")}</strong><small>{payment.status}</small></div></article>)}</div><h3 className="subheading">Invoices</h3><div className="booking-list">{invoices.map((invoice) => <article className="booking-row" key={invoice._id}><div><strong>{invoice.invoiceNumber || invoice._id}</strong><span>Digital invoice</span></div><div className="booking-row-side"><strong>₹{Number(invoice.totalAmount || invoice.amount || 0).toLocaleString("en-IN")}</strong><button className="text-button" onClick={() => downloadInvoice(invoice)}>Download</button></div></article>)}</div></section>}
 
+      {tab === "rideguard" && <section className="rideguard-page">
+        <div className="rideguard-hero"><div className="rideguard-hero-copy"><span className="section-label">RIDEGUARD</span><h2>Your Safe Ride, <em>Our Priority</em></h2><p>Locked fares · Trusted drivers · 24×7 protection</p><span className="protected-pill"><ShieldCheck size={16}/> Protected on every ride</span></div><div className="rideguard-hero-art"><ShieldCheck size={74}/><div className="hero-car">🚕</div></div></div>
+        <div className="rideguard-feature-grid">{[[ShieldCheck,"Auto Rescue","If your driver doesn't move or becomes unresponsive, we automatically find another driver.","Phase 1","blue"],[LockKeyhole,"Fare Lock","Your quoted fare is locked at booking. No surprise extra fare without approval.","Phase 2","gold"],[Star,"Reliable Drivers","Trusted drivers with strong ratings and better response history get priority.","Phase 3","green"],[CreditCard,"Payment Protection","Payments are verified before your ride is finalized.","Phase 4","purple"],[AlertTriangle,"Incident Center","Report problems and track resolution with the support team.","Phase 5","red"],[Gift,"Driver Rewards","Good drivers earn reward points for reliable service.","Phase 6","mint"]].map(([Icon,title,text,phase,tone])=><article className={`rideguard-feature-card ${tone}`} key={phase}><div className="feature-icon"><Icon size={22}/></div><h3>{title}</h3><p>{text}</p><span>{phase}</span></article>)}</div>
+        <div className="rideguard-main-grid"><div className="dashboard-card rideguard-report-card"><div className="rideguard-card-title"><div><span className="section-label">REPORT AN ISSUE</span><h2>We protect your ride</h2><p>Facing a problem? Tell us once and RideGuard takes action.</p></div><div className="shield-orb"><ShieldCheck size={22}/></div></div><label>Booking<select value={rideGuardBookingId} onChange={(e)=>setRideGuardBookingId(e.target.value)}><option value="">Select booking</option>{bookings.filter((b)=>!['Completed','Cancelled'].includes(b.status)).map((b)=><option key={b._id} value={b._id}>{b.bookingId} · {b.status}</option>)}</select></label><label>What went wrong?<select value={rideGuardType} onChange={(e)=>setRideGuardType(e.target.value)}><option value="driver_not_moving">Driver accepted but not moving</option><option value="driver_asked_cancel">Driver asked me to cancel</option><option value="driver_unresponsive">Driver is unresponsive</option><option value="driver_no_show">Driver did not show up</option><option value="extra_fare">Driver demanded extra fare</option><option value="fare_dispute">Fare dispute</option><option value="payment_refusal">Driver refused/blocked payment</option><option value="other">Other</option></select></label>{rideGuardType === "extra_fare" && <label>Extra amount requested<input type="number" min="0" value={rideGuardAmount} onChange={(e)=>setRideGuardAmount(e.target.value)} placeholder="₹ amount"/></label>}<label>Tell us more <span className="optional-label">(optional)</span><textarea rows="4" value={rideGuardDescription} onChange={(e)=>setRideGuardDescription(e.target.value)} placeholder="Describe what happened…"/></label><button className="rideguard-primary" onClick={submitRideGuard} disabled={rideGuardSubmitting}>{rideGuardSubmitting?"Activating protection…":"Report & protect my ride"}</button></div>
+          <div className="rideguard-side-stack"><div className="dashboard-card protection-status-card"><div className="status-card-top"><div><span className="section-label">LIVE PROTECTION STATUS</span><h3>You're protected</h3></div><span className="active-badge">ACTIVE</span></div><div className="status-line"><CheckCircle2 size={17}/> Booking protection enabled</div><div className="status-line"><LockKeyhole size={17}/> Fare locked at booking</div><div className="status-line"><ShieldCheck size={17}/> Auto Rescue available</div></div><div className="dashboard-card fare-protection-card"><div className="status-card-top"><div><span className="section-label">FARE & PAYMENT</span><h3>Protected</h3></div><ShieldCheck size={28}/></div>{bookings.filter((b)=>!['Completed','Cancelled'].includes(b.status)).slice(0,3).map((b)=><div className="compact-protection-row" key={b._id}><div><strong>{b.bookingId}</strong><span>{b.pickupLocation} → {b.dropLocation}</span></div><b>₹{Number(b.lockedFare??b.estimatedFare??0).toLocaleString('en-IN')}</b></div>)}</div></div></div>
+        {fareTransparency && <div className="dashboard-card rideguard-ledger-card"><div className="status-card-top"><div><span className="section-label">TRANSPARENT FARE</span><h3>Know exactly what you pay</h3></div><LockKeyhole size={22}/></div><div className="fare-ledger">{[["Original estimate",fareTransparency.originalEstimate],["Locked fare",fareTransparency.lockedFare],["Coupon discount",-Number(fareTransparency.couponDiscount||0)],["Waiting charge",fareTransparency.waitingCharge],["Approved adjustment",fareTransparency.otherApprovedAdjustments]].map(([label,value])=><div key={label}><span>{label}</span><strong>₹{Number(value||0).toLocaleString('en-IN')}</strong></div>)}<div className="fare-ledger-total"><span>Final fare</span><strong>₹{Number(fareTransparency.finalFare||0).toLocaleString('en-IN')}</strong></div></div></div>}
+      </section>}
       {tab === "support" && <section className="support-grid"><div className="dashboard-card"><div className="card-heading"><div><span className="section-label">SUPPORT</span><h2>Need help?</h2></div><MessageCircle size={20} /></div><textarea rows="6" value={supportText} onChange={(e) => setSupportText(e.target.value)} placeholder="Tell the travel team what happened..." /><button className="dashboard-primary" onClick={createTicket}><Send size={16} /> Create ticket</button></div><div className="dashboard-card"><div className="card-heading"><h2>Your tickets</h2></div>{tickets.length ? tickets.map((ticket) => <article className="support-item" key={ticket._id}><strong>{ticket.subject}</strong><span>{ticket.status}</span><p>{ticket.description}</p></article>) : <p className="empty-state">No support tickets.</p>}</div></section>}
 
       {finalFareTrip && fareModalOpen && <div className="modal-backdrop final-fare-backdrop" role="dialog" aria-modal="true" aria-labelledby="final-fare-title">
@@ -421,7 +524,38 @@ const CustomerDashboard = () => {
         </section>
       </div>}
 
+      {ratingModalTripId && (() => {
+        const trip = trips.find((item) => String(item._id) === String(ratingModalTripId));
+        if (!trip) return null;
+        const driverName = trip.driver?.name || trip.driver?.user?.name || "Your driver";
+        const vehicle = trip.vehicle || {};
+        const vehicleName = vehicle.name || `${vehicle.brand || ""} ${vehicle.model || ""}`.trim() || vehicle.vehicleType || "Your vehicle";
+        const driverScore = Number(rating[ratingModalTripId]?.score || 0);
+        const carScore = Number(vehicleRating[ratingModalTripId] || 0);
+        return <div className="modal-backdrop rating-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="ride-rating-title">
+          <section className="modal-card ride-rating-modal">
+            <div className="rating-modal-icon"><Star size={25} fill="currentColor" /></div>
+            <span className="section-label">RIDE COMPLETED</span>
+            <h2 id="ride-rating-title">How was your ride?</h2>
+            <p className="muted-text">Payment successful. Tell us about your driver and vehicle.</p>
+            <div className="ride-rating-section">
+              <div className="ride-rating-heading"><span>👤 Driver</span><strong>{driverName}</strong></div>
+              <div className="popup-rating-stars" aria-label="Rate driver">{[1,2,3,4,5].map((star) => <button key={star} type="button" className={driverScore >= star ? "selected" : ""} aria-label={`${star} star${star > 1 ? "s" : ""}`} onClick={() => setRating((current) => ({ ...current, [ratingModalTripId]: { ...current[ratingModalTripId], score: star } }))}><Star size={30} fill="currentColor" /></button>)}</div>
+            </div>
+            <div className="ride-rating-section">
+              <div className="ride-rating-heading"><span>🚕 Vehicle</span><strong>{vehicleName}{vehicle.vehicleNumber ? ` · ${vehicle.vehicleNumber}` : ""}</strong></div>
+              <div className="popup-rating-stars" aria-label="Rate vehicle">{[1,2,3,4,5].map((star) => <button key={star} type="button" className={carScore >= star ? "selected" : ""} aria-label={`${star} star${star > 1 ? "s" : ""}`} onClick={() => setVehicleRating((current) => ({ ...current, [ratingModalTripId]: star }))}><Star size={30} fill="currentColor" /></button>)}</div>
+            </div>
+            <textarea className="ride-rating-review" rows="3" value={rating[ratingModalTripId]?.review || ""} onChange={(e) => setRating((current) => ({ ...current, [ratingModalTripId]: { ...current[ratingModalTripId], review: e.target.value } }))} placeholder="Optional: tell us what you liked or what we can improve…" maxLength={1000} />
+            <button className="dashboard-primary wide rating-submit-button" onClick={() => rateTrip(ratingModalTripId)} disabled={ratingLoading || !driverScore || !carScore}>{ratingLoading ? "Saving your rating…" : "Submit rating"}</button>
+            <button className="text-button rating-later-button" onClick={() => { sessionStorage.setItem(`travels_rating_submitted_${ratingModalTripId}`, "1"); setRatingModalTripId(null); }}>Rate later</button>
+          </section>
+        </div>;
+      })()}
+
       {submitting && <div className="booking-loading-overlay" role="status" aria-live="polite"><div className="booking-loading-modal"><img src={loadingGif} alt="" /><span className="section-label">TRAVELS</span><h2>Finding your ride</h2><p>Confirming your booking and preparing the next step of your journey…</p></div></div>}
+
+      {cancelModalBooking && <div className="cancel-modal-backdrop" role="dialog" aria-modal="true"><div className="cancel-modal"><button className="cancel-modal-close" onClick={closeCancelModal} disabled={cancelSubmitting}><X size={20}/></button><div className="cancel-modal-icon"><X size={25}/></div><span className="section-label">CANCEL BOOKING</span><h2>Why are you cancelling?</h2><p>Please select a reason. This helps us improve your experience and protect future rides.</p><div className="cancel-reason-grid">{["Found another ride","Driver is taking too long","Change in plan","Booked by mistake","Driver not responding","Wrong pickup location","Fare is too high","Other"].map((reason)=><button key={reason} className={`cancel-reason ${cancelReason===reason?"selected":""}`} onClick={()=>setCancelReason(reason)}><span>{reason === "Found another ride" ? "⌛" : reason === "Driver is taking too long" ? "🚕" : reason === "Change in plan" ? "↔" : reason === "Booked by mistake" ? "📅" : reason === "Driver not responding" ? "💬" : reason === "Wrong pickup location" ? "⌖" : reason === "Fare is too high" ? "₹" : "…"}</span>{reason}</button>)}</div><textarea className="cancel-details" value={cancelDetails} onChange={(e)=>setCancelDetails(e.target.value)} placeholder="Tell us more (optional)…" rows="3"/><button className="cancel-confirm-button" disabled={!cancelReason||cancelSubmitting} onClick={cancelBooking}>{cancelSubmitting?"Cancelling…":"Cancel Booking"}</button><button className="cancel-keep-button" disabled={cancelSubmitting} onClick={closeCancelModal}>Keep My Booking</button></div></div>}
 
       {tab === "safety" && <section className="support-grid"><div className="dashboard-card sos-card"><ShieldAlert size={28} /><h2>Emergency assistance</h2><p>Use SOS only when you need urgent travel assistance.</p><textarea rows="3" value={sosText} onChange={(e) => setSosText(e.target.value)} placeholder="Optional message" /><button className="danger-button" onClick={triggerSOS}>Send SOS</button></div><div className="dashboard-card"><h2>Trip safety</h2><div className="safety-list"><div><Phone size={17} /><span>Masked communication</span></div><div><Navigation size={17} /><span>Live trip tracking</span></div><div><Share2 size={17} /><span>Share trip with someone you trust</span></div><div><ShieldAlert size={17} /><span>Emergency operations support</span></div></div></div></section>}
     </main>

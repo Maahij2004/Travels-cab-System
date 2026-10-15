@@ -36,6 +36,7 @@ const commissionRoutes = require("./routes/commissionRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const dispatchRoutes = require("./routes/dispatchRoutes");
+const rideGuardRoutes = require("./routes/rideGuardRoutes");
 const { startDispatchWorker } = require("./services/dispatchService");
 
 const app = express();
@@ -74,6 +75,7 @@ app.use("/api/commissions", commissionRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/dispatch", dispatchRoutes);
+app.use("/api/rideguard", rideGuardRoutes);
 
 // Home
 app.get("/", (req, res) => {
@@ -88,6 +90,18 @@ app.get("/api/health", (req, res) => {
   res.json({
     success: true,
     message: "Server is healthy",
+  });
+});
+
+app.get("/api/rideguard/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "RideGuard API is registered",
+    routes: [
+      "/api/rideguard/incidents",
+      "/api/rideguard/admin/incident-center",
+      "/api/rideguard/admin/fare-transparency",
+    ],
   });
 });
 

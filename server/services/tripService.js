@@ -35,7 +35,7 @@ const createTripFromBooking = async (bookingId) => {
         booking: booking._id,
     });
 
-    if (existingTrip) {
+    if (existingTrip && existingTrip.status !== "Cancelled") {
         return existingTrip;
     }
 
@@ -50,8 +50,8 @@ const createTripFromBooking = async (bookingId) => {
         dropLocation: booking.dropLocation,
         scheduledDate: booking.travelDate,
         distanceKm: booking.distanceKm || 0,
-        estimatedFare: booking.estimatedFare || 0,
-        finalFare: booking.estimatedFare || 0,
+        estimatedFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
+        finalFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
         status: "Scheduled",
     });
 
@@ -117,9 +117,25 @@ const completeTrip = async (trip) => {
     await trip.save();
     booking.status = "Completed";
     booking.estimatedFare = trip.finalFare;
+    // Locked fare remains the protected base; approved waiting/extra charges may be added separately.
     await booking.save();
 
     const driver = await Driver.findById(trip.driver);
+
+    if (driver) {
+        // RideGuard Phase 6: reward a successfully completed trip.
+        driver.rewardPoints = Math.max(0, Number(driver.rewardPoints || 0)) + 25;
+        await driver.save();
+        try {
+            const RewardLedger = require("../models/DriverRewardLedger");
+            await RewardLedger.create({
+                driver: driver._id, points: 25, balanceAfter: driver.rewardPoints,
+                reason: "Completed trip reward", source: "trip"
+            });
+        } catch (rewardError) {
+            console.warn("Driver reward ledger write failed:", rewardError.message);
+        }
+    }
 
     if (driver) {
         driver.status = "Available";
@@ -163,6 +179,21 @@ const cancelTrip = async (trip, reason = "") => {
     }
 
     const driver = await Driver.findById(trip.driver);
+
+    if (driver) {
+        // RideGuard Phase 6: reward a successfully completed trip.
+        driver.rewardPoints = Math.max(0, Number(driver.rewardPoints || 0)) + 25;
+        await driver.save();
+        try {
+            const RewardLedger = require("../models/DriverRewardLedger");
+            await RewardLedger.create({
+                driver: driver._id, points: 25, balanceAfter: driver.rewardPoints,
+                reason: "Completed trip reward", source: "trip"
+            });
+        } catch (rewardError) {
+            console.warn("Driver reward ledger write failed:", rewardError.message);
+        }
+    }
 
     if (driver) {
         driver.status = "Available";

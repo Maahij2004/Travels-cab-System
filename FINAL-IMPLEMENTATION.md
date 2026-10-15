@@ -53,3 +53,9 @@ Client uses `VITE_API_URL=http://localhost:5000/api`.
 ## Verification note
 
 All backend JavaScript files were syntax-checked successfully in the build workspace. The client dependency installation/build could not be completed in this environment because the package installation transport timed out; the project source and lockfiles are included for local `npm.cmd ci` / `npm.cmd run build:*` verification.
+
+## RideGuard Phase 5–6
+- Admin Incident Center with incident summary and resolution queue.
+- Transparent fare ledger for customers and Admin Fare Guard comparison.
+- Driver reward wallet with tiers and reward ledger.
+- Automatic 25-point completed-trip reward and 10-point reward for ratings of 4–5.

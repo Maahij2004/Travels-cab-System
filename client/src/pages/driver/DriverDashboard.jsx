@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, RefreshCw, Send, ShieldAlert, UserRound } from "lucide-react";
+import { AlertTriangle, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, RefreshCw, Send, ShieldAlert, Star, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
 
@@ -18,6 +18,8 @@ const DriverDashboard = () => {
   const [otpTrip, setOtpTrip] = useState(null);
   const [otpValue, setOtpValue] = useState("");
   const [cashPayments, setCashPayments] = useState({});
+  const [reliability, setReliability] = useState(null);
+  const [rewards, setRewards] = useState(null);
 
   const loadOffer = useCallback(async () => {
     try {
@@ -36,6 +38,8 @@ const DriverDashboard = () => {
         api.get("/trips/driver/my"),
         api.get("/driver-location/my"),
         api.get("/drivers/me"),
+        api.get("/rideguard/reliability/me"),
+        api.get("/rideguard/rewards/me"),
       ]);
 
       const [tripsResult, locationResult, profileResult] = results;
@@ -57,6 +61,11 @@ const DriverDashboard = () => {
       } else {
         failures.push(profileResult.reason?.response?.data?.message || "Unable to load driver profile.");
       }
+
+      const reliabilityResult = results[3];
+      if (reliabilityResult.status === "fulfilled") { setReliability(reliabilityResult.value.data); }
+      const rewardsResult = results[4];
+      if (rewardsResult.status === "fulfilled") { setRewards(rewardsResult.value.data.rewards || null); }
 
       if (failures.length) setError(failures.join(" "));
       else setError("");
@@ -237,6 +246,8 @@ const DriverDashboard = () => {
         </section>
       </div>}
       <div className="driver-control-grid">
+        <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">RIDEGUARD · PHASE 3</span><h2>Reliability & rewards</h2></div><Star size={20} /></div>{reliability ? <div className="trip-details"><div><span>Reliability score</span><strong>{reliability.reliability?.score ?? 70}/100</strong></div><div><span>Average rating</span><strong>{reliability.reliability?.avgRating ?? "—"} ★</strong></div><div><span>Completed</span><strong>{reliability.reliability?.completed ?? 0}</strong></div><div><span>Reward points</span><strong>{reliability.rewardPoints ?? 0}</strong></div></div> : <p className="muted-text">Loading reliability score…</p>}<p className="muted-text" style={{marginTop:"8px"}}>{reliability?.trustedDriver ? "🛡️ Trusted Driver — priority dispatch enabled." : "Complete reliable trips and maintain strong ratings to become a Trusted Driver."}</p></section>
+        <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">RIDEGUARD · PHASE 6</span><h2>Rewards wallet</h2></div><Star size={20} /></div>{rewards ? <><div className="trip-details"><div><span>Tier</span><strong>{rewards.tier?.name || "Starter"}</strong></div><div><span>Points</span><strong>{rewards.points || 0}</strong></div><div><span>Next tier</span><strong>{rewards.tier?.next ? `${rewards.tier.next} pts` : "Elite achieved"}</strong></div><div><span>Trusted</span><strong>{rewards.trustedDriver ? "Yes" : "Not yet"}</strong></div></div><p className="muted-text" style={{marginTop:"8px"}}>Earn points for reliable service and maintain strong ratings. Your reward history is recorded for transparency.</p>{rewards.ledger?.length > 0 && <div className="data-table-wrap" style={{marginTop:"12px"}}><table><thead><tr><th>Date</th><th>Points</th><th>Balance</th><th>Reason</th></tr></thead><tbody>{rewards.ledger.slice(0,8).map((item)=><tr key={item._id}><td>{new Date(item.createdAt).toLocaleString("en-IN")}</td><td>{item.points > 0 ? `+${item.points}` : item.points}</td><td>{item.balanceAfter}</td><td>{item.reason}</td></tr>)}</tbody></table></div>}</> : <p className="muted-text">Loading rewards wallet…</p>}</section>
         <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">AVAILABILITY</span><h2>Ready for work?</h2></div><UserRound size={20} /></div><div className="availability-control"><button className={availability === "Available" ? "active" : ""} onClick={() => updateAvailability("Available")} disabled={["Assigned", "On Trip"].includes(availability)}>Available</button><button className={availability === "On Leave" ? "active" : ""} onClick={() => updateAvailability("On Leave")} disabled={["Assigned", "On Trip"].includes(availability)}>On leave</button><span>Status: {availability}</span></div></section>
         <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">LIVE GPS</span><h2>Driver location</h2></div><Navigation size={20} /></div><p className="muted-text">Location updates every 10 seconds while sharing is enabled.</p><button className={`dashboard-primary ${locationSharing ? "dark-outline" : ""}`} onClick={toggleLocation}>{locationSharing ? "Stop location sharing" : "Start location sharing"}</button></section>
       </div>

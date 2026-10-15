@@ -12,26 +12,30 @@ const Driver = require("../models/driver");
 // ==========================================
 const createRating = async (req, res) => {
     try {
-        const { tripId, rating, review } = req.body;
+        const { tripId, rating, driverRating, vehicleRating, review } = req.body;
 
         // Validate input
-        if (!tripId || rating === undefined) {
+        if (!tripId || rating === undefined || vehicleRating === undefined) {
             return res.status(400).json({
                 success: false,
-                message: "tripId and rating are required",
+                message: "tripId, driver rating and vehicle rating are required",
             });
         }
 
-        const numericRating = Number(rating);
+        const numericRating = Number(driverRating ?? rating);
+        const numericVehicleRating = Number(vehicleRating);
 
         if (
             !Number.isFinite(numericRating) ||
             numericRating < 1 ||
-            numericRating > 5
+            numericRating > 5 ||
+            !Number.isFinite(numericVehicleRating) ||
+            numericVehicleRating < 1 ||
+            numericVehicleRating > 5
         ) {
             return res.status(400).json({
                 success: false,
-                message: "Rating must be between 1 and 5",
+                message: "Driver and vehicle ratings must be between 1 and 5",
             });
         }
 
@@ -120,9 +124,30 @@ const createRating = async (req, res) => {
             booking: booking._id,
             customer: customer._id,
             driver: trip.driver,
+            vehicle: trip.vehicle || null,
             rating: numericRating,
+            driverRating: numericRating,
+            vehicleRating: numericVehicleRating,
             review: review ? review.trim() : "",
         });
+
+        // RideGuard Phase 6: strong customer ratings earn a small service bonus.
+        if (numericRating >= 4) {
+            const driver = await Driver.findById(trip.driver);
+            if (driver) {
+                driver.rewardPoints = Math.max(0, Number(driver.rewardPoints || 0)) + 10;
+                await driver.save();
+                try {
+                    const RewardLedger = require("../models/DriverRewardLedger");
+                    await RewardLedger.create({
+                        driver: driver._id, points: 10, balanceAfter: driver.rewardPoints,
+                        reason: `Customer rating reward (${numericRating}/5)`, source: "rating"
+                    });
+                } catch (rewardError) {
+                    console.warn("Driver rating reward ledger write failed:", rewardError.message);
+                }
+            }
+        }
 
         return res.status(201).json({
             success: true,
@@ -256,6 +281,10 @@ const getMyTripRating = async (req, res) => {
             .populate(
                 "trip",
                 "tripId status"
+            )
+            .populate(
+                "vehicle",
+                "name vehicleNumber vehicleType brand model image"
             );
 
         return res.status(200).json({
@@ -274,8 +303,37 @@ const getMyTripRating = async (req, res) => {
 };
 
 
+// ==========================================
+// ADMIN - VIEW ALL RATINGS
+// ==========================================
+const getAllRatings = async (req, res) => {
+    try {
+        const ratings = await Rating.find({})
+            .populate("customer", "customerId fullName email phone")
+            .populate("driver", "driverId fullName phone")
+            .populate("vehicle", "vehicleId vehicleNumber brand model")
+            .populate("trip", "tripId status")
+            .populate("booking", "bookingId pickupLocation dropLocation")
+            .sort({ createdAt: -1 });
+
+        return res.status(200).json({
+            success: true,
+            ratings,
+            count: ratings.length,
+        });
+    } catch (error) {
+        console.error("Get All Ratings Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: error.message,
+        });
+    }
+};
+
+
 module.exports = {
     createRating,
     getDriverRatings,
     getMyTripRating,
+    getAllRatings,
 };

@@ -108,6 +108,15 @@ const bookingSchema = new mongoose.Schema(
             min: 0,
         },
 
+        // RideGuard Phase 1 + 2
+        lockedFare: { type: Number, default: null, min: 0 },
+        fareLockedAt: { type: Date, default: null },
+        fareLockReason: { type: String, default: "Booking fare locked at confirmation" },
+        driverAcceptedAt: { type: Date, default: null },
+        commitmentDeadlineAt: { type: Date, default: null },
+        rescueTriggeredAt: { type: Date, default: null },
+        rescueCount: { type: Number, default: 0, min: 0 },
+
         couponCode: {
             type: String,
             default: null,

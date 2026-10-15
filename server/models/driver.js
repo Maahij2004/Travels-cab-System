@@ -97,6 +97,12 @@ const driverSchema = new mongoose.Schema(
             default: false,
         },
 
+        // RideGuard Phase 3 — driver reliability and rewards
+        reliabilityScore: { type: Number, default: 70, min: 0, max: 100 },
+        trustedDriver: { type: Boolean, default: false },
+        rewardPoints: { type: Number, default: 0, min: 0 },
+        reliabilityUpdatedAt: { type: Date, default: null },
+
         notes: {
             type: String,
             default: "",

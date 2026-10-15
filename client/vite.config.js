@@ -20,6 +20,12 @@ export default defineConfig(({ mode }) => {
       host: "localhost",
       port,
       strictPort: true,
+      proxy: {
+        "/api": {
+          target: "http://localhost:5000",
+          changeOrigin: true,
+        },
+      },
     },
     preview: {
       host: "localhost",

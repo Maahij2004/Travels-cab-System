@@ -4,6 +4,7 @@ const DriverLocation = require("../models/DriverLocation");
 const Vehicle = require("../models/Vehicle");
 const DispatchOffer = require("../models/DispatchOffer");
 const Trip = require("../models/trip");
+const RideGuardIncident = require("../models/RideGuardIncident");
 const { createTripFromBooking } = require("./tripService");
 const { createNotification } = require("./notificationService");
 const { randomUUID } = require("crypto");
@@ -82,7 +83,14 @@ const getEligibleDrivers = async (booking) => {
     return { driver, distanceToPickupKm };
   });
 
+  // Phase 3: reliability is the primary smart-dispatch signal.
+  // GPS remains a tie-breaker so missing location never excludes a driver.
   scored.sort((a, b) => {
+    const reliabilityDiff = Number(b.driver.reliabilityScore || 70) - Number(a.driver.reliabilityScore || 70);
+    if (reliabilityDiff) return reliabilityDiff;
+    if (Boolean(b.driver.trustedDriver) !== Boolean(a.driver.trustedDriver)) {
+      return b.driver.trustedDriver ? 1 : -1;
+    }
     const aHasLocation = Number.isFinite(a.distanceToPickupKm);
     const bHasLocation = Number.isFinite(b.distanceToPickupKm);
     if (aHasLocation !== bHasLocation) return aHasLocation ? -1 : 1;
@@ -101,7 +109,7 @@ const cancelPendingOffers = async (bookingId, exceptId = null) => {
 };
 
 const populateDispatchOffer = (query) => query
-  .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare")
+  .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare lockedFare commitmentDeadlineAt")
   .populate("driver", "driverId fullName phone")
   .populate("vehicle", "vehicleId vehicleNumber name brand model");
 
@@ -283,6 +291,9 @@ const acceptOffer = async (offerId, driverUserId) => {
   booking.assignedDriver = driver._id;
   booking.assignedVehicle = vehicle._id;
   booking.status = "Trip Scheduled";
+  booking.driverAcceptedAt = new Date();
+  booking.commitmentDeadlineAt = new Date(Date.now() + 2 * 60 * 1000);
+  booking.rescueTriggeredAt = null;
   await booking.save();
 
   let trip;
@@ -360,7 +371,7 @@ const getMyActiveOffer = async (driverUserId) => {
   if (!driver) throw new Error("Driver profile not found");
   const offer = await DispatchOffer.findOne({ driver: driver._id, status: "Pending" })
     .sort({ createdAt: -1 })
-    .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare")
+    .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare lockedFare commitmentDeadlineAt")
     .populate("driver", "driverId fullName phone")
     .populate("vehicle", "vehicleId vehicleNumber name brand model");
   if (offer && offer.expiresAt <= new Date()) {
@@ -394,8 +405,32 @@ const processExpiredOffers = async () => {
   }
 };
 
+const processCommitmentBreaches = async () => {
+  const now = new Date();
+  const overdue = await Booking.find({
+    status: "Trip Scheduled", assignedDriver: { $ne: null },
+    commitmentDeadlineAt: { $lte: now }, rescueTriggeredAt: null,
+  }).limit(20);
+  for (const booking of overdue) {
+    try {
+      const oldDriver = booking.assignedDriver;
+      const oldVehicle = booking.assignedVehicle;
+      const trip = await Trip.findOne({ booking: booking._id, status: "Scheduled" });
+      if (trip) { trip.status = "Cancelled"; trip.cancellationReason = "RideGuard commitment timer expired"; await trip.save(); }
+      if (oldDriver) await Driver.findByIdAndUpdate(oldDriver, { status: "Available", availability: true, assignedVehicle: null });
+      if (oldVehicle) await Vehicle.findByIdAndUpdate(oldVehicle, { status: "Available", availability: true });
+      booking.assignedDriver = null; booking.assignedVehicle = null; booking.status = "Pending";
+      booking.rescueTriggeredAt = now; booking.rescueCount = Number(booking.rescueCount || 0) + 1;
+      booking.driverAcceptedAt = null; booking.commitmentDeadlineAt = null;
+      await booking.save();
+      await RideGuardIncident.create({ booking: booking._id, trip: trip?._id || null, customer: booking.customer, driver: oldDriver, vehicle: oldVehicle, reportedByRole: "admin", type: "driver_unresponsive", severity: "high", description: "Driver commitment timer expired before pickup movement was confirmed.", lockedFare: booking.lockedFare ?? booking.estimatedFare, status: "Investigating", resolution: "Automatic Auto Rescue activated; booking returned to dispatch queue." });
+      await startDispatch(booking._id);
+    } catch (error) { console.warn(`RideGuard commitment rescue failed for ${booking.bookingId}: ${error.message}`); }
+  }
+};
+
 const startDispatchWorker = () => {
-  const timer = setInterval(() => { processExpiredOffers().catch((error) => console.warn(`Dispatch worker error: ${error.message}`)); }, 5000);
+  const timer = setInterval(() => { processExpiredOffers().catch((error) => console.warn(`Dispatch worker error: ${error.message}`)); processCommitmentBreaches().catch((error) => console.warn(`Commitment worker error: ${error.message}`)); }, 5000);
   timer.unref?.();
 };
 
@@ -406,5 +441,6 @@ module.exports = {
   declineOffer,
   getMyActiveOffer,
   processExpiredOffers,
+  processCommitmentBreaches,
   startDispatchWorker,
 };
