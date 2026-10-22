@@ -375,8 +375,14 @@ const getMyActiveOffer = async (driverUserId) => {
     .populate("driver", "driverId fullName phone")
     .populate("vehicle", "vehicleId vehicleNumber name brand model");
   if (offer && offer.expiresAt <= new Date()) {
-    const nextOffer = await expireOffer(offer);
-    return nextOffer || null;
+    // Do not make the driver's polling request wait for the full expiry/
+    // redispatch workflow. Mark/redispatch in the background and let the next
+    // fast poll pick up the newly-created offer. This keeps the driver UI
+    // responsive even when MongoDB is under load.
+    expireOffer(offer).catch((error) => {
+      console.warn(`[dispatch] Could not advance expired offer ${offer._id}: ${error.message}`);
+    });
+    return null;
   }
   return offer;
 };

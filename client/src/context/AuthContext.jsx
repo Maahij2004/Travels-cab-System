@@ -11,8 +11,16 @@ const clearStoredAuth = () => {
 };
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(() => {
+    try {
+      const stored = localStorage.getItem(USER_KEY);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      localStorage.removeItem(USER_KEY);
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(() => !localStorage.getItem(USER_KEY));
 
   const logout = useCallback(() => {
     clearStoredAuth();
@@ -24,8 +32,11 @@ export const AuthProvider = ({ children }) => {
       const response = await getCurrentUser();
       setUser(response.user);
       localStorage.setItem(USER_KEY, JSON.stringify(response.user));
-    } catch {
-      logout();
+    } catch (error) {
+      // A temporary network/Render cold-start failure should not log the driver
+      // out when a valid cached session already exists. The API interceptor
+      // still handles a real 401 and clears the session.
+      if ([401, 403].includes(error.response?.status)) logout();
     } finally {
       setLoading(false);
     }
@@ -37,6 +48,9 @@ export const AuthProvider = ({ children }) => {
       setLoading(false);
       return undefined;
     }
+
+    // Use the cached identity immediately so portal navigation does not wait
+    // for /auth/me. The API still validates the token in the background.
     loadUser();
     return undefined;
   }, [loadUser]);

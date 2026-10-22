@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, RefreshCw, Send, ShieldAlert, Star, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
@@ -15,6 +15,9 @@ const DriverDashboard = () => {
   const [rideOffer, setRideOffer] = useState(null);
   const [offerSeconds, setOfferSeconds] = useState(0);
   const [offerLoading, setOfferLoading] = useState(false);
+  const offerRequestInFlight = useRef(false);
+  const offerPollTimer = useRef(null);
+  const offerFailureCount = useRef(0);
   const [otpTrip, setOtpTrip] = useState(null);
   const [otpValue, setOtpValue] = useState("");
   const [cashPayments, setCashPayments] = useState({});
@@ -22,12 +25,30 @@ const DriverDashboard = () => {
   const [rewards, setRewards] = useState(null);
 
   const loadOffer = useCallback(async () => {
+    // Never allow overlapping offer requests. On slower hosting, the previous
+    // 1-second interval could create concurrent requests whose responses
+    // arrived out of order and hid a real ride offer.
+    if (offerRequestInFlight.current) return false;
+    offerRequestInFlight.current = true;
     try {
-      const response = await api.get("/dispatch/driver/current");
-      setRideOffer(response.data.offer || null);
+      const response = await api.get("/dispatch/driver/current", { timeout: 8000 });
+      const nextOffer = response.data.offer || null;
+      offerFailureCount.current = 0;
+      setRideOffer(nextOffer);
+      setError((current) => current === "Unable to load ride requests." ? "" : current);
+      return Boolean(nextOffer);
     } catch (err) {
-      const message = err.response?.data?.message || "Unable to load ride requests.";
-      setError((current) => current === message ? current : message);
+      offerFailureCount.current += 1;
+      // Do not flash a dashboard error for one transient request failure.
+      // Show it only after repeated failures so a delayed Render/Mongo request
+      // cannot make a valid ride popup appear to be missing.
+      if (offerFailureCount.current >= 3) {
+        const message = err.response?.data?.message || "Unable to load ride requests.";
+        setError((current) => current === message ? current : message);
+      }
+      return false;
+    } finally {
+      offerRequestInFlight.current = false;
     }
   }, []);
 
@@ -100,19 +121,33 @@ const DriverDashboard = () => {
   }, [refreshPaymentStatuses, trips]);
 
   useEffect(() => {
-    // Poll frequently so a newly created dispatch offer appears without
-    // requiring a manual page refresh. The API remains the source of truth.
-    const timer = window.setInterval(() => { loadOffer(); }, 1000);
-    loadOffer();
-    const refresh = () => loadOffer();
+    // Single-flight polling: one request at a time, with a short retry when
+    // there is no active offer. When an offer exists we stop polling and let
+    // the expiry timer below trigger the next lookup. This is much faster and
+    // safer than stacking 1-second requests on a slow hosted API.
+    let cancelled = false;
+
+    const poll = async () => {
+      if (cancelled || rideOffer) return;
+      const found = await loadOffer();
+      if (!cancelled && !found && !rideOffer) {
+        offerPollTimer.current = window.setTimeout(poll, 650);
+      }
+    };
+
+    poll();
+    const refresh = () => {
+      if (!rideOffer) poll();
+    };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
-      window.clearInterval(timer);
+      cancelled = true;
+      if (offerPollTimer.current) window.clearTimeout(offerPollTimer.current);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [loadOffer]);
+  }, [loadOffer, rideOffer]);
 
   useEffect(() => {
     if (!rideOffer?.expiresAt) { setOfferSeconds(0); return undefined; }
@@ -120,9 +155,10 @@ const DriverDashboard = () => {
       const seconds = Math.max(0, Math.ceil((new Date(rideOffer.expiresAt).getTime() - Date.now()) / 1000));
       setOfferSeconds(seconds);
       if (seconds === 0) {
-        // Ask the server immediately for the next driver offer instead of
-        // waiting for the next polling interval.
-        window.setTimeout(loadOffer, 150);
+        // Clear the expired popup immediately, then ask the server for the next
+        // offer. This prevents a stale modal from blocking the next request.
+        setRideOffer(null);
+        window.setTimeout(loadOffer, 50);
       }
     };
     tick();

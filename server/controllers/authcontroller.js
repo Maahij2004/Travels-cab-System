@@ -3,6 +3,8 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/user");
 const Customer = require("../models/customer");
 
+const BCRYPT_ROUNDS = Math.max(10, Number(process.env.BCRYPT_ROUNDS || 10));
+
 // Generate JWT
 const generateToken = (user) => {
     return jwt.sign(
@@ -58,7 +60,7 @@ const register = async (req, res) => {
         }
 
         // Hash password
-        const hashedPassword = await bcrypt.hash(password, 12);
+        const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
         // Create customer
         const user = await User.create({
@@ -157,6 +159,16 @@ const login = async (req, res) => {
                 success: false,
                 message: "Invalid email or password",
             });
+        }
+
+        // Keep login responsive. If an older account was created with a higher
+        // bcrypt cost, upgrade it after the response path instead of making the
+        // current login wait for a second password hash.
+        const storedRounds = Number((user.password || "").split("$")[2]) || 0;
+        if (storedRounds > BCRYPT_ROUNDS) {
+            bcrypt.hash(password, BCRYPT_ROUNDS)
+                .then((newHash) => User.findByIdAndUpdate(user._id, { password: newHash }))
+                .catch((error) => console.warn("Password cost upgrade skipped:", error.message));
         }
 
         // Generate token

@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
+import api from "../../services/api";
 
 const PORTAL_ROLE = import.meta.env.VITE_PORTAL_ROLE || "portal";
 const portalMeta = {
@@ -28,6 +29,13 @@ const Login = () => {
     expected: [],
     home: "/",
   };
+
+  useEffect(() => {
+    // Render-style hosting may sleep the API when idle. Warm it in the
+    // background while the driver/customer enters credentials so the login
+    // request does not become the first cold-start request.
+    api.get("/health", { timeout: 5000 }).catch(() => { });
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
