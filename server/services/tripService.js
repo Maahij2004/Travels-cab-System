@@ -35,27 +35,67 @@ const createTripFromBooking = async (bookingId) => {
         booking: booking._id,
     });
 
-    if (existingTrip && existingTrip.status !== "Cancelled") {
+    if (existingTrip) {
+        if (existingTrip.status !== "Cancelled") {
+            return existingTrip;
+        }
+
+        // A previous assignment for this booking was cancelled (e.g. driver cancelled or commitment timer expired).
+        // Reactivate and update the existing trip record for the new assignment to avoid violating the unique booking index.
+        existingTrip.driver = booking.assignedDriver._id;
+        existingTrip.vehicle = booking.assignedVehicle._id;
+        existingTrip.pickupLocation = booking.pickupLocation;
+        existingTrip.dropLocation = booking.dropLocation;
+        existingTrip.scheduledDate = booking.travelDate;
+        existingTrip.distanceKm = booking.distanceKm || 0;
+        existingTrip.estimatedFare = booking.lockedFare ?? booking.estimatedFare ?? 0;
+        existingTrip.finalFare = booking.lockedFare ?? booking.estimatedFare ?? 0;
+        existingTrip.status = "Scheduled";
+        existingTrip.startedAt = null;
+        existingTrip.pickedUpAt = null;
+        existingTrip.destinationReachedAt = null;
+        existingTrip.completedAt = null;
+        existingTrip.cancellationReason = "";
+        existingTrip.startOtpHash = null;
+        existingTrip.startOtpCiphertext = null;
+        existingTrip.startOtpExpiresAt = null;
+        existingTrip.startOtpAttempts = 0;
+        existingTrip.startOtpUsedAt = null;
+        await existingTrip.save();
         return existingTrip;
     }
 
     const tripId = await generateTripId();
 
-    const trip = await Trip.create({
-        tripId,
-        booking: booking._id,
-        driver: booking.assignedDriver._id,
-        vehicle: booking.assignedVehicle._id,
-        pickupLocation: booking.pickupLocation,
-        dropLocation: booking.dropLocation,
-        scheduledDate: booking.travelDate,
-        distanceKm: booking.distanceKm || 0,
-        estimatedFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
-        finalFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
-        status: "Scheduled",
-    });
+    try {
+        const trip = await Trip.create({
+            tripId,
+            booking: booking._id,
+            driver: booking.assignedDriver._id,
+            vehicle: booking.assignedVehicle._id,
+            pickupLocation: booking.pickupLocation,
+            dropLocation: booking.dropLocation,
+            scheduledDate: booking.travelDate,
+            distanceKm: booking.distanceKm || 0,
+            estimatedFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
+            finalFare: booking.lockedFare ?? booking.estimatedFare ?? 0,
+            status: "Scheduled",
+        });
 
-    return trip;
+        return trip;
+    } catch (createError) {
+        if (createError?.code === 11000) {
+            const trip = await Trip.findOne({ booking: booking._id });
+            if (trip) {
+                trip.driver = booking.assignedDriver._id;
+                trip.vehicle = booking.assignedVehicle._id;
+                trip.status = "Scheduled";
+                await trip.save();
+                return trip;
+            }
+        }
+        throw createError;
+    }
 };
 
 const updateTripStatus = async (trip, newStatus) => {
