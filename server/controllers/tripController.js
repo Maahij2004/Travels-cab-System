@@ -14,6 +14,7 @@ const {
     decryptOtp,
 } = require("../services/tripService");
 const { startDispatch } = require("../services/dispatchService");
+const { emitToUser } = require("../services/socketService");
 
 // Create trip
 const createTrip = async (req, res) => {
@@ -279,6 +280,13 @@ const changeTripStatus = async (req, res) => {
             });
         }
 
+        try {
+            const b = await Booking.findById(trip.booking).select("customer").lean();
+            const c = b?.customer ? await Customer.findById(b.customer).select("user").lean() : null;
+            if (c?.user) emitToUser(c.user, "trip:status", { tripId: trip._id, status, trip: updatedTrip });
+            if (req.user?._id) emitToUser(req.user._id, "trip:status", { tripId: trip._id, status, trip: updatedTrip });
+        } catch { /* realtime emit error ignored */ }
+
         res.json({
             success: true,
             message: `Trip status updated to ${status}`,
@@ -294,6 +302,11 @@ const generatePickupOtp = async (req, res) => {
         const trip = await Trip.findById(req.params.id); const driver = await Driver.findOne({ user: req.user._id });
         if (!trip || !driver || String(trip.driver) !== String(driver._id)) return res.status(403).json({ success:false, message:"You are not assigned to this trip" });
         const result = await generateStartOtp(trip._id);
+        try {
+            const b = await Booking.findById(trip.booking).select("customer").lean();
+            const c = b?.customer ? await Customer.findById(b.customer).select("user").lean() : null;
+            if (c?.user) emitToUser(c.user, "trip:otp", { tripId: trip._id, otp: result.otp, expiresAt: result.expiresAt });
+        } catch { /* realtime emit error ignored */ }
         // Never reveal the customer's start code to the driver API response.
         // The assigned customer retrieves it through the protected customer endpoint.
         res.json({ success:true, message:"Pickup OTP generated for the customer", expiresAt:result.expiresAt });
@@ -305,6 +318,12 @@ const verifyPickupOtp = async (req, res) => {
         if (!trip || !driver || String(trip.driver) !== String(driver._id)) return res.status(403).json({ success:false, message:"You are not assigned to this trip" });
         if (!/^\d{6}$/.test(String(req.body.otp || ""))) return res.status(400).json({ success:false, message:"Enter the 6-digit pickup OTP" });
         const updatedTrip = await verifyStartOtp(trip._id, req.body.otp);
+        try {
+            const b = await Booking.findById(trip.booking).select("customer").lean();
+            const c = b?.customer ? await Customer.findById(b.customer).select("user").lean() : null;
+            if (c?.user) emitToUser(c.user, "trip:status", { tripId: trip._id, status: "Started", trip: updatedTrip });
+            emitToUser(driver.user, "trip:status", { tripId: trip._id, status: "Started", trip: updatedTrip });
+        } catch { /* realtime emit error ignored */ }
         res.json({ success:true, message:"OTP verified. Trip started.", trip:updatedTrip });
     } catch (error) { res.status(400).json({ success:false, message:error.message }); }
 };
@@ -328,7 +347,13 @@ const cancelDriverTrip = async (req, res) => {
         const reason = req.body.reason || "Driver cancelled before pickup";
         await cancelTrip(trip, reason);
         const booking = await Booking.findById(trip.booking);
-        if (booking) { booking.assignedDriver=null; booking.assignedVehicle=null; booking.status="Pending"; booking.cancellationReason=""; await booking.save(); try { await startDispatch(booking._id); } catch (e) { console.warn(`Re-dispatch failed: ${e.message}`); } }
+        if (booking) {
+            try {
+                const c = await Customer.findById(booking.customer).select("user").lean();
+                if (c?.user) emitToUser(c.user, "trip:status", { tripId: trip._id, status: "Cancelled", trip, reason });
+            } catch { /* ignore emit error */ }
+            booking.assignedDriver=null; booking.assignedVehicle=null; booking.status="Pending"; booking.cancellationReason=""; await booking.save(); try { await startDispatch(booking._id); } catch (e) { console.warn(`Re-dispatch failed: ${e.message}`); }
+        }
         res.json({ success:true, message:"Trip cancelled and the system is searching for another nearby driver.", trip });
     } catch (error) { res.status(400).json({ success:false, message:error.message }); }
 };

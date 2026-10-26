@@ -34,7 +34,7 @@ const Login = () => {
     // Render-style hosting may sleep the API when idle. Warm it in the
     // background while the driver/customer enters credentials so the login
     // request does not become the first cold-start request.
-    api.get("/health", { timeout: 5000 }).catch(() => { });
+    api.get("/health", { timeout: 5000 }).catch(() => {});
   }, []);
 
   const handleSubmit = async (e) => {

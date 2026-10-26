@@ -9,6 +9,7 @@ const bcrypt = require("bcryptjs");
 
 const User = require("./models/user");
 const Driver = require("./models/driver");
+const VehicleCategory = require("./models/VehicleCategory");
 
 const driverGroups = {
   Mini: 7,
@@ -101,6 +102,8 @@ async function seedDrivers() {
 
         // Create driver
         console.log(`Creating driver → ${driverId}`);
+        const vehicleCategory = await VehicleCategory.findOne({ name: category, isActive: true });
+        if (!vehicleCategory) throw new Error(`Vehicle category not found: ${category}`);
 
         const driver = await Driver.create({
           driverId,
@@ -126,6 +129,7 @@ async function seedDrivers() {
             2 + (i % 8),
 
           assignedVehicle: null,
+          vehicleCategory: vehicleCategory._id,
 
           availability: true,
 

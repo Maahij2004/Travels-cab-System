@@ -11,6 +11,7 @@ const {
     refundPayment,
 } = require("../services/paymentService");
 const Driver = require("../models/driver");
+const { emitToUser } = require("../services/socketService");
 
 
 /*
@@ -91,6 +92,10 @@ const createPayment = async (req, res) => {
 
             if (method === "Cash") {
                 await existingPayment.save();
+                try {
+                    const d = await Driver.findById(trip.driver).select("user").lean();
+                    if (d?.user) emitToUser(d.user, "payment:updated", { tripId: trip._id, payment: existingPayment });
+                } catch { /* ignore emit error */ }
                 return res.status(200).json({
                     success: true,
                     message: "Cash payment selected",
@@ -135,6 +140,11 @@ const createPayment = async (req, res) => {
                 customerId: customer._id,
                 amount,
             });
+
+            try {
+                const d = await Driver.findById(trip.driver).select("user").lean();
+                if (d?.user) emitToUser(d.user, "payment:updated", { tripId: trip._id, payment });
+            } catch { /* ignore emit error */ }
 
             return res.status(201).json({
                 success: true,
@@ -216,6 +226,14 @@ const verifyPayment = async (req, res) => {
             razorpaySignature,
             customerId: customer._id,
         });
+
+        try {
+            const trip = await Trip.findById(result.payment?.trip).select("driver").lean();
+            if (trip?.driver) {
+                const d = await Driver.findById(trip.driver).select("user").lean();
+                if (d?.user) emitToUser(d.user, "payment:updated", { tripId: trip._id, payment: result.payment });
+            }
+        } catch { /* ignore emit error */ }
 
         res.json({
             success: true,
@@ -393,6 +411,16 @@ const confirmCashByDriver = async (req, res) => {
         }
 
         const result = await markCashPaymentPaid(payment._id, driver._id);
+
+        try {
+            const booking = await Booking.findById(trip.booking).select("customer").lean();
+            const customer = booking?.customer ? await Customer.findById(booking.customer).select("user").lean() : null;
+            if (customer?.user) {
+                emitToUser(customer.user, "trip:completed", { tripId: trip._id, payment: result.payment, invoice: result.invoice });
+                emitToUser(customer.user, "trip:status", { tripId: trip._id, status: "Completed", trip });
+            }
+        } catch { /* ignore emit error */ }
+
         res.json({
             success: true,
             message: `Payment status verified (${result.payment.method}). Trip completed and invoice generated.`,

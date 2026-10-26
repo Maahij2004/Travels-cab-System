@@ -71,6 +71,14 @@ const driverSchema = new mongoose.Schema(
             default: null,
         },
 
+        // Vehicle class this driver is eligible to receive. The driver can
+        // still have a concrete assignedVehicle when a ride is accepted.
+        vehicleCategory: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "VehicleCategory",
+            default: null,
+        },
+
         availability: {
             type: Boolean,
             default: true,

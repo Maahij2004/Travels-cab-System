@@ -13,6 +13,7 @@ const {
 
 const Pricing = require("../models/pricing");
 const { startDispatch } = require("../services/dispatchService");
+const { emitToUser } = require("../services/socketService");
 
 // ============================================
 // CREATE BOOKING
@@ -676,6 +677,16 @@ const cancelBooking = async (req, res) => {
             }
 
             await booking.save();
+        }
+
+        if (trip?.driver || booking.assignedDriver) {
+            try {
+                const driverId = trip?.driver || booking.assignedDriver;
+                const d = await require("../models/driver").findById(driverId).select("user").lean();
+                if (d?.user) {
+                    emitToUser(d.user, "booking:cancelled", { bookingId: booking._id, reason: cancellationReason });
+                }
+            } catch { /* ignore emit error */ }
         }
 
         const updatedBooking = await Booking.findById(booking._id)

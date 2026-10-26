@@ -3,6 +3,7 @@ const Driver = require("../models/driver");
 const Trip = require("../models/trip");
 const Customer = require("../models/customer");
 const Booking = require("../models/booking");
+const { emitToUser } = require("../services/socketService");
 
 
 // ==========================================
@@ -106,6 +107,24 @@ const updateDriverLocation = async (req, res) => {
         )
             .populate("driver")
             .populate("trip");
+
+        if (trip) {
+            try {
+                const b = await Booking.findById(trip.booking).select("customer").lean();
+                const c = b?.customer ? await Customer.findById(b.customer).select("user").lean() : null;
+                if (c?.user) {
+                    emitToUser(c.user, "driver:location", {
+                        driverId: driver._id,
+                        tripId: trip._id,
+                        latitude,
+                        longitude,
+                        accuracy,
+                        heading,
+                        speed,
+                    });
+                }
+            } catch { /* ignore location emit error */ }
+        }
 
         return res.status(200).json({
             success: true,

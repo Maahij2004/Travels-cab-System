@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, RefreshCw, Send, ShieldAlert, Star, UserRound } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
+import { connectDispatchSocket } from "../../services/socket";
 
 const DriverDashboard = () => {
   const { user, logout } = useAuth();
@@ -97,6 +98,26 @@ const DriverDashboard = () => {
 
   useEffect(() => { load(); }, [load]);
 
+  const playOfferChime = useCallback(() => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, now);
+      osc.frequency.setValueAtTime(880, now + 0.12);
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.45);
+    } catch { /* audio context policy safe */ }
+  }, []);
+
   const refreshPaymentStatuses = useCallback(async () => {
     const destinationTrips = trips.filter((trip) => trip.status === "Destination Reached");
     if (!destinationTrips.length) return;
@@ -116,38 +137,76 @@ const DriverDashboard = () => {
   useEffect(() => {
     if (!trips.some((trip) => trip.status === "Destination Reached")) return undefined;
     refreshPaymentStatuses();
-    const timer = window.setInterval(refreshPaymentStatuses, 5000);
+    const timer = window.setInterval(refreshPaymentStatuses, 2000);
     return () => window.clearInterval(timer);
   }, [refreshPaymentStatuses, trips]);
 
   useEffect(() => {
-    // Single-flight polling: one request at a time, with a short retry when
-    // there is no active offer. When an offer exists we stop polling and let
-    // the expiry timer below trigger the next lookup. This is much faster and
-    // safer than stacking 1-second requests on a slow hosted API.
     let cancelled = false;
+    const socket = connectDispatchSocket();
+    const handleOffer = (payload) => {
+      if (cancelled || !payload?.offer) return;
+      setRideOffer(payload.offer);
+      setOfferSeconds(Math.max(0, Math.ceil((new Date(payload.offer.expiresAt).getTime() - Date.now()) / 1000)));
+      offerFailureCount.current = 0;
+      playOfferChime();
+    };
 
+    const handleOfferExpired = (payload) => {
+      if (cancelled) return;
+      setRideOffer((current) => (current?._id === payload?.offerId ? null : current));
+      loadOffer();
+    };
+
+    const handlePaymentUpdated = (payload) => {
+      if (cancelled || !payload?.tripId) return;
+      if (payload.payment) {
+        setCashPayments((current) => ({ ...current, [payload.tripId]: payload.payment }));
+        setMessage(`Payment updated by customer: ${payload.payment.method} · ${payload.payment.status}`);
+      }
+      refreshPaymentStatuses();
+    };
+
+    const handleBookingCancelled = (payload) => {
+      if (cancelled) return;
+      setMessage("Ride cancelled by passenger.");
+      setRideOffer(null);
+      load();
+    };
+
+    const handleTripStatus = () => {
+      if (cancelled) return;
+      load();
+    };
+
+    socket?.on("dispatch:offer", handleOffer);
+    socket?.on("dispatch:expired", handleOfferExpired);
+    socket?.on("payment:updated", handlePaymentUpdated);
+    socket?.on("booking:cancelled", handleBookingCancelled);
+    socket?.on("trip:status", handleTripStatus);
+
+    // REST remains a fast recovery path for cold starts and reconnects
     const poll = async () => {
       if (cancelled || rideOffer) return;
       const found = await loadOffer();
-      if (!cancelled && !found && !rideOffer) {
-        offerPollTimer.current = window.setTimeout(poll, 650);
-      }
+      if (!cancelled && !found && !rideOffer) offerPollTimer.current = window.setTimeout(poll, 800);
     };
-
     poll();
-    const refresh = () => {
-      if (!rideOffer) poll();
-    };
+    const refresh = () => { if (!rideOffer) poll(); };
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
       cancelled = true;
+      socket?.off("dispatch:offer", handleOffer);
+      socket?.off("dispatch:expired", handleOfferExpired);
+      socket?.off("payment:updated", handlePaymentUpdated);
+      socket?.off("booking:cancelled", handleBookingCancelled);
+      socket?.off("trip:status", handleTripStatus);
       if (offerPollTimer.current) window.clearTimeout(offerPollTimer.current);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, [loadOffer, rideOffer]);
+  }, [loadOffer, rideOffer, playOfferChime, refreshPaymentStatuses, load]);
 
   useEffect(() => {
     if (!rideOffer?.expiresAt) { setOfferSeconds(0); return undefined; }

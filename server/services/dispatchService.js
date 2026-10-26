@@ -2,12 +2,14 @@ const Booking = require("../models/booking");
 const Driver = require("../models/driver");
 const DriverLocation = require("../models/DriverLocation");
 const Vehicle = require("../models/Vehicle");
+const VehicleCategory = require("../models/VehicleCategory");
 const DispatchOffer = require("../models/DispatchOffer");
 const Trip = require("../models/trip");
 const RideGuardIncident = require("../models/RideGuardIncident");
 const { createTripFromBooking } = require("./tripService");
 const { createNotification } = require("./notificationService");
 const { randomUUID } = require("crypto");
+const { emitToUser, emitToDriver } = require("./socketService");
 
 const OFFER_TIMEOUT_MS = 20000;
 const LOCATION_MAX_AGE_MS = 2 * 60 * 1000;
@@ -39,14 +41,13 @@ const getPickupCoordinates = (booking) => {
 };
 
 const getEligibleDrivers = async (booking) => {
-  const vehicleIds = await Vehicle.find({
+  const availableVehicle = await Vehicle.exists({
     category: booking.vehicleCategory,
     availability: true,
     status: "Available",
     seatingCapacity: { $gte: booking.passengerCount },
-  }).distinct("_id");
-
-  if (!vehicleIds.length) {
+  });
+  if (!availableVehicle) {
     warnDispatchBlocked(booking, "No available vehicle matches the selected category and passenger count.");
     return [];
   }
@@ -57,24 +58,29 @@ const getEligibleDrivers = async (booking) => {
     isActive: true,
     $or: [{ isVerified: true }, { isVerified: { $exists: false } }],
     licenseExpiry: { $gt: new Date() },
-  }).sort({ createdAt: 1 });
+    $and: [
+      {
+        $or: [
+          { vehicleCategory: booking.vehicleCategory },
+          { vehicleCategory: null },
+          { vehicleCategory: { $exists: false } },
+        ],
+      },
+    ],
+  }).populate("vehicleCategory", "name code seatingCapacity").sort({ createdAt: 1 });
 
   if (!drivers.length) {
-    warnDispatchBlocked(booking, "No active, available, verified driver with a valid licence is eligible. GPS is not required to receive an offer.");
+    warnDispatchBlocked(booking, "No active available driver is eligible for the selected vehicle category.");
     return [];
   }
 
-  // GPS is used only to rank drivers by proximity. A missing/stale GPS fix must
-  // never exclude an otherwise eligible driver from receiving a ride offer.
   const driverLocations = await DriverLocation.find({
     driver: { $in: drivers.map((driver) => driver._id) },
     isActive: true,
     updatedAtLocation: { $gte: new Date(Date.now() - LOCATION_MAX_AGE_MS) },
   }).lean();
-
   const locationMap = new Map(driverLocations.map((item) => [String(item.driver), item]));
   const pickup = getPickupCoordinates(booking);
-
   const scored = drivers.map((driver) => {
     const location = locationMap.get(String(driver._id));
     const distanceToPickupKm = pickup && location
@@ -82,22 +88,45 @@ const getEligibleDrivers = async (booking) => {
       : Number.POSITIVE_INFINITY;
     return { driver, distanceToPickupKm };
   });
-
-  // Phase 3: reliability is the primary smart-dispatch signal.
-  // GPS remains a tie-breaker so missing location never excludes a driver.
   scored.sort((a, b) => {
+    // Prefer drivers specifically registered for this vehicle category
+    const aMatch = String(a.driver.vehicleCategory?._id || a.driver.vehicleCategory || "") === String(booking.vehicleCategory);
+    const bMatch = String(b.driver.vehicleCategory?._id || b.driver.vehicleCategory || "") === String(booking.vehicleCategory);
+    if (aMatch !== bMatch) return aMatch ? -1 : 1;
+
     const reliabilityDiff = Number(b.driver.reliabilityScore || 70) - Number(a.driver.reliabilityScore || 70);
     if (reliabilityDiff) return reliabilityDiff;
-    if (Boolean(b.driver.trustedDriver) !== Boolean(a.driver.trustedDriver)) {
-      return b.driver.trustedDriver ? 1 : -1;
-    }
+    if (Boolean(b.driver.trustedDriver) !== Boolean(a.driver.trustedDriver)) return b.driver.trustedDriver ? 1 : -1;
     const aHasLocation = Number.isFinite(a.distanceToPickupKm);
     const bHasLocation = Number.isFinite(b.distanceToPickupKm);
     if (aHasLocation !== bHasLocation) return aHasLocation ? -1 : 1;
-    return a.distanceToPickupKm - b.distanceToPickupKm ||
-      new Date(a.driver.createdAt || 0) - new Date(b.driver.createdAt || 0);
+    return a.distanceToPickupKm - b.distanceToPickupKm || new Date(a.driver.createdAt || 0) - new Date(b.driver.createdAt || 0);
   });
   return scored;
+};
+
+const getAlternativeVehicleCategories = async (booking) => {
+  const categories = await VehicleCategory.find({ isActive: true }).sort({ createdAt: 1 }).lean();
+  const results = [];
+  for (const category of categories) {
+    if (String(category._id) === String(booking.vehicleCategory)) continue;
+    const [driverCount, vehicleCount] = await Promise.all([
+      Driver.countDocuments({ vehicleCategory: category._id, availability: true, status: "Available", isActive: true, $or: [{ isVerified: true }, { isVerified: { $exists: false } }], licenseExpiry: { $gt: new Date() } }),
+      Vehicle.countDocuments({ category: category._id, availability: true, status: "Available", seatingCapacity: { $gte: booking.passengerCount } }),
+    ]);
+    if (driverCount > 0 && vehicleCount > 0) results.push({ _id: category._id, name: category.name, code: category.code, seatingCapacity: category.seatingCapacity, availableDrivers: driverCount });
+  }
+  return results;
+};
+
+const notifyDispatchState = async (booking, payload) => {
+  try {
+    const Customer = require("../models/customer");
+    const customer = await Customer.findById(booking.customer).select("user").lean();
+    if (customer?.user) emitToUser(customer.user, "dispatch:status", { bookingId: booking._id, ...payload });
+  } catch (error) {
+    console.warn(`[dispatch] realtime customer notification failed: ${error.message}`);
+  }
 };
 
 const cancelPendingOffers = async (bookingId, exceptId = null) => {
@@ -110,7 +139,7 @@ const cancelPendingOffers = async (bookingId, exceptId = null) => {
 
 const populateDispatchOffer = (query) => query
   .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare lockedFare commitmentDeadlineAt")
-  .populate("driver", "driverId fullName phone")
+  .populate("driver", "driverId fullName phone user vehicleCategory")
   .populate("vehicle", "vehicleId vehicleNumber name brand model");
 
 // Only one process at a time may create the next offer for a booking. This
@@ -154,6 +183,8 @@ const offerNextDriver = async (bookingId) => {
     if (!eligible.length) {
       booking.status = "Pending";
       await booking.save();
+      const alternatives = await getAlternativeVehicleCategories(booking);
+      await notifyDispatchState(booking, { type: "unavailable", message: "No drivers are available for the selected vehicle right now.", alternatives });
       return null;
     }
 
@@ -177,6 +208,8 @@ const offerNextDriver = async (bookingId) => {
       warnDispatchBlocked(booking, "All currently eligible drivers explicitly declined this booking.");
       booking.status = "Pending";
       await booking.save();
+      const alternatives = await getAlternativeVehicleCategories(booking);
+      await notifyDispatchState(booking, { type: "unavailable", message: "No drivers accepted the selected vehicle. Choose another available vehicle to continue.", alternatives });
       return null;
     }
 
@@ -240,6 +273,11 @@ const offerNextDriver = async (bookingId) => {
         booking: booking._id,
       });
     }
+    if (next.driver.user) {
+      emitToUser(next.driver.user, "dispatch:offer", { offer: populated });
+    }
+    emitToDriver(next.driver._id, "dispatch:offer", { offer: populated });
+    await notifyDispatchState(booking, { type: "driver_contacted", offer: populated });
 
     return populated;
   } finally {
@@ -257,63 +295,58 @@ const startDispatch = async (bookingId) => {
 const acceptOffer = async (offerId, driverUserId) => {
   const offer = await DispatchOffer.findById(offerId).populate("booking");
   if (!offer) throw new Error("Ride request not found");
-  const driver = await Driver.findOne({ _id: offer.driver, user: driverUserId, isActive: true });
+  const driver = await Driver.findOne({ _id: offer.driver, user: driverUserId, isActive: true }).populate("vehicleCategory", "name code");
   if (!driver) throw new Error("Ride request is not assigned to this driver");
   if (offer.status !== "Pending") throw new Error("This ride request is no longer available");
-  if (offer.expiresAt <= new Date()) {
-    await expireOffer(offer);
-    throw new Error("Ride request expired");
+  if (offer.expiresAt <= new Date()) { await expireOffer(offer); throw new Error("Ride request expired"); }
+
+  const booking = await Booking.findOneAndUpdate(
+    { _id: offer.booking._id, status: { $in: ["Pending", "Confirmed"] }, assignedDriver: null },
+    { $set: { assignedDriver: driver._id, status: "Trip Scheduled", driverAcceptedAt: new Date(), commitmentDeadlineAt: new Date(Date.now() + 2 * 60 * 1000), rescueTriggeredAt: null } },
+    { new: true }
+  );
+  if (!booking) throw new Error("Booking is no longer available");
+  if (!driver.availability || driver.status !== "Available") {
+    await Booking.updateOne({ _id: booking._id, assignedDriver: driver._id }, { $set: { assignedDriver: null, status: "Pending", driverAcceptedAt: null, commitmentDeadlineAt: null } });
+    throw new Error("Driver is no longer available");
   }
 
-  const booking = await Booking.findById(offer.booking._id);
-  if (!booking || booking.status === "Cancelled" || booking.assignedDriver) throw new Error("Booking is no longer available");
-  if (!driver.availability || driver.status !== "Available") throw new Error("Driver is no longer available");
+  const driverClaim = await Driver.findOneAndUpdate(
+    { _id: driver._id, availability: true, status: "Available" },
+    { $set: { status: "Assigned", availability: false } },
+    { new: true }
+  );
+  if (!driverClaim) {
+    await Booking.updateOne({ _id: booking._id, assignedDriver: driver._id }, { $set: { assignedDriver: null, status: "Pending", driverAcceptedAt: null, commitmentDeadlineAt: null } });
+    throw new Error("Driver is no longer available");
+  }
 
-  const vehicle = await Vehicle.findOne({
-    category: booking.vehicleCategory,
-    availability: true,
-    status: "Available",
-    seatingCapacity: { $gte: booking.passengerCount },
-  }).sort({ createdAt: 1 });
-  if (!vehicle) throw new Error("No suitable vehicle is available for this ride");
+  const vehicle = await Vehicle.findOneAndUpdate(
+    { category: booking.vehicleCategory, availability: true, status: "Available", seatingCapacity: { $gte: booking.passengerCount } },
+    { $set: { status: "Assigned", availability: false } },
+    { new: true, sort: { createdAt: 1 } }
+  );
+  if (!vehicle) {
+    await Driver.updateOne({ _id: driver._id }, { $set: { status: "Available", availability: true } });
+    await Booking.updateOne({ _id: booking._id, assignedDriver: driver._id }, { $set: { assignedDriver: null, status: "Pending", driverAcceptedAt: null, commitmentDeadlineAt: null } });
+    throw new Error("No suitable vehicle is available for this ride");
+  }
 
-  await cancelPendingOffers(booking._id, offer._id);
-
-  vehicle.status = "Assigned";
-  vehicle.availability = false;
-  await vehicle.save();
-
-  driver.status = "Assigned";
-  driver.availability = false;
-  driver.assignedVehicle = vehicle._id;
-  await driver.save();
-
-  booking.assignedDriver = driver._id;
   booking.assignedVehicle = vehicle._id;
-  booking.status = "Trip Scheduled";
-  booking.driverAcceptedAt = new Date();
-  booking.commitmentDeadlineAt = new Date(Date.now() + 2 * 60 * 1000);
-  booking.rescueTriggeredAt = null;
   await booking.save();
+  await cancelPendingOffers(booking._id, offer._id);
 
   let trip;
   try {
     trip = await createTripFromBooking(booking._id);
   } catch (error) {
-    vehicle.status = "Available";
-    vehicle.availability = true;
-    await vehicle.save();
-    driver.status = "Available";
-    driver.availability = true;
-    driver.assignedVehicle = null;
-    await driver.save();
-    booking.assignedDriver = null;
-    booking.assignedVehicle = null;
-    booking.status = "Pending";
-    await booking.save();
+    await Vehicle.updateOne({ _id: vehicle._id }, { $set: { status: "Available", availability: true } });
+    await Driver.updateOne({ _id: driver._id }, { $set: { status: "Available", availability: true, assignedVehicle: null } });
+    await Booking.updateOne({ _id: booking._id }, { $set: { assignedDriver: null, assignedVehicle: null, status: "Pending", driverAcceptedAt: null, commitmentDeadlineAt: null } });
     throw error;
   }
 
+  await Driver.updateOne({ _id: driver._id }, { $set: { assignedVehicle: vehicle._id } });
   offer.status = "Accepted";
   offer.vehicle = vehicle._id;
   offer.respondedAt = new Date();
@@ -321,23 +354,11 @@ const acceptOffer = async (offerId, driverUserId) => {
 
   const customerUserId = (await require("../models/customer").findById(booking.customer).populate("user", "_id"))?.user?._id;
   if (customerUserId) {
-    await createNotification({
-      recipient: customerUserId,
-      title: "Driver confirmed",
-      message: `${driver.fullName} accepted ${booking.bookingId}. Your ${vehicle.vehicleNumber} is scheduled for pickup.`,
-      type: "Assignment",
-      booking: booking._id,
-      trip: trip._id,
-    });
+    await createNotification({ recipient: customerUserId, title: "Driver confirmed", message: `${driver.fullName} accepted ${booking.bookingId}. Your ${vehicle.vehicleNumber} is scheduled for pickup.`, type: "Assignment", booking: booking._id, trip: trip._id });
+    emitToUser(customerUserId, "dispatch:accepted", { bookingId: booking._id, booking, driver, vehicle, trip });
   }
-  await createNotification({
-    recipient: driver.user,
-    title: "Ride accepted",
-    message: `${booking.bookingId} is now assigned to you. Navigate to the pickup location.`,
-    type: "Assignment",
-    booking: booking._id,
-    trip: trip._id,
-  });
+  await createNotification({ recipient: driver.user, title: "Ride accepted", message: `${booking.bookingId} is now assigned to you. Navigate to the pickup location.`, type: "Assignment", booking: booking._id, trip: trip._id });
+  emitToUser(driver.user, "dispatch:accepted", { bookingId: booking._id, offer, booking, driver, vehicle, trip });
 
   return { offer, booking, driver, vehicle, trip };
 };
@@ -348,6 +369,11 @@ const expireOffer = async (offer) => {
   offer.respondedAt = new Date();
   offer.responseReason = "Driver did not respond before the timer ended";
   await offer.save();
+  try {
+    const driver = await Driver.findById(offer.driver).select("user").lean();
+    if (driver?.user) emitToUser(driver.user, "dispatch:expired", { offerId: offer._id });
+    emitToDriver(offer.driver, "dispatch:expired", { offerId: offer._id });
+  } catch { /* ignore notification failure */ }
   return offerNextDriver(offer.booking);
 };
 
@@ -362,6 +388,8 @@ const declineOffer = async (offerId, driverUserId, reason = "Driver declined") =
   offer.respondedAt = new Date();
   offer.responseReason = reason;
   await offer.save();
+  emitToUser(driverUserId, "dispatch:declined", { offerId: offer._id });
+  emitToDriver(driver._id, "dispatch:declined", { offerId: offer._id });
 
   return offerNextDriver(offer.booking._id);
 };
@@ -372,7 +400,7 @@ const getMyActiveOffer = async (driverUserId) => {
   const offer = await DispatchOffer.findOne({ driver: driver._id, status: "Pending" })
     .sort({ createdAt: -1 })
     .populate("booking", "bookingId pickupLocation dropLocation travelDate travelTime passengerCount tripType estimatedFare lockedFare commitmentDeadlineAt")
-    .populate("driver", "driverId fullName phone")
+    .populate("driver", "driverId fullName phone user vehicleCategory")
     .populate("vehicle", "vehicleId vehicleNumber name brand model");
   if (offer && offer.expiresAt <= new Date()) {
     // Do not make the driver's polling request wait for the full expiry/
@@ -436,7 +464,10 @@ const processCommitmentBreaches = async () => {
 };
 
 const startDispatchWorker = () => {
-  const timer = setInterval(() => { processExpiredOffers().catch((error) => console.warn(`Dispatch worker error: ${error.message}`)); processCommitmentBreaches().catch((error) => console.warn(`Commitment worker error: ${error.message}`)); }, 5000);
+  const timer = setInterval(() => {
+    processExpiredOffers().catch((error) => console.warn(`Dispatch worker error: ${error.message}`));
+    processCommitmentBreaches().catch((error) => console.warn(`Commitment worker error: ${error.message}`));
+  }, 1500);
   timer.unref?.();
 };
 

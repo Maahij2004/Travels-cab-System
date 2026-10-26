@@ -26,6 +26,7 @@ const createDriver = async (req, res) => {
             licenseExpiry,
             experienceYears,
             assignedVehicle,
+            vehicleCategory,
             notes,
         } = req.body;
 
@@ -148,6 +149,7 @@ const createDriver = async (req, res) => {
             licenseExpiry,
             experienceYears: experienceYears || 0,
             assignedVehicle: assignedVehicle || null,
+            vehicleCategory: vehicleCategory || (vehicle ? vehicle.category : null),
             availability: assignedVehicle ? false : true,
             status: assignedVehicle
                 ? "Assigned"

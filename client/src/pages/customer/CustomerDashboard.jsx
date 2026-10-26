@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, CheckCircle2, Clock3, CreditCard, LogOut, MessageCircle, Navigation, Phone, RefreshCw, Receipt, Send, Share2, ShieldAlert, ShieldCheck, LockKeyhole, Star, Wallet, X, AlertTriangle, Gift } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
+import { connectDispatchSocket } from "../../services/socket";
 import ExactLocationPicker from "../../components/booking/ExactLocationPicker";
 import { computeDrivingRoute } from "../../services/mapsService";
 import loadingGif from "../../assets/travels-loading.gif";
@@ -58,8 +59,8 @@ const CustomerDashboard = () => {
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
 
-  const loadCore = useCallback(async () => {
-    setLoading(true);
+  const loadCore = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
     try {
       // A newly registered customer has a User account immediately, while the
       // legacy backend may create the Customer profile lazily. Ensure the
@@ -73,7 +74,7 @@ const CustomerDashboard = () => {
       setCategories(cats); setBookings(bookingResponse.data.bookings || []); setTrips(tripResponse.data.trips || []);
       setForm((current) => ({ ...current, vehicleCategory: current.vehicleCategory || cats[0]?._id || "" }));
     } catch (err) { setError(err.response?.data?.message || "Unable to load your travel data."); }
-    finally { setLoading(false); }
+    finally { if (showLoading) setLoading(false); }
   }, []);
 
   // Keep trip status current in every customer tab so the final-fare popup
@@ -151,7 +152,79 @@ const CustomerDashboard = () => {
     try { const response = await api.get("/support/my"); setTickets(response.data.tickets || []); } catch (err) { setError(err.response?.data?.message || "Unable to load support tickets."); }
   }, []);
 
-  useEffect(() => { loadCore(); }, [loadCore]);
+  useEffect(() => { loadCore(true); }, [loadCore]);
+  useEffect(() => {
+    const socket = connectDispatchSocket();
+    if (!socket) return undefined;
+
+    const handleDispatchStatus = () => {
+      loadCore(false);
+    };
+
+    const handleDispatchAccepted = (data) => {
+      if (data?.booking) {
+        setBookings((current) => [
+          data.booking,
+          ...current.filter((b) => String(b._id) !== String(data.booking._id)),
+        ]);
+      }
+      if (data?.trip) {
+        setTrips((current) => [
+          data.trip,
+          ...current.filter((t) => String(t._id) !== String(data.trip._id)),
+        ]);
+      }
+      loadCore(false);
+    };
+
+    const handleTripOtp = (data) => {
+      setPickupOtp(data);
+    };
+
+    const handleTripStatus = (data) => {
+      if (data?.trip) {
+        setTrips((current) => [
+          data.trip,
+          ...current.filter((t) => String(t._id) !== String(data.trip._id)),
+        ]);
+      }
+      if (data?.status === "Destination Reached") {
+        setFareModalOpen(true);
+      }
+      loadCore(false);
+    };
+
+    const handleTripCompleted = (data) => {
+      setFareModalOpen(false);
+      if (data?.tripId) {
+        setRatingModalTripId(data.tripId);
+      }
+      loadCore(false);
+      loadFinance();
+    };
+
+    const handlePaymentVerified = () => {
+      loadFinance();
+      loadCore(false);
+    };
+
+    socket.on("dispatch:status", handleDispatchStatus);
+    socket.on("dispatch:accepted", handleDispatchAccepted);
+    socket.on("trip:otp", handleTripOtp);
+    socket.on("trip:status", handleTripStatus);
+    socket.on("trip:completed", handleTripCompleted);
+    socket.on("payment:verified", handlePaymentVerified);
+
+    return () => {
+      socket.off("dispatch:status", handleDispatchStatus);
+      socket.off("dispatch:accepted", handleDispatchAccepted);
+      socket.off("trip:otp", handleTripOtp);
+      socket.off("trip:status", handleTripStatus);
+      socket.off("trip:completed", handleTripCompleted);
+      socket.off("payment:verified", handlePaymentVerified);
+    };
+  }, [loadCore, loadFinance]);
+
   useEffect(() => { if (trips.length) loadTripRatings(trips); }, [trips, loadTripRatings]);
 
   useEffect(() => {
@@ -260,7 +333,7 @@ const CustomerDashboard = () => {
         passengerPhone: bookForOther ? passengerPhone : user?.phone,
       };
       const response = await api.post("/bookings", payload);
-      setMessage(response.data.message || "Booking created successfully."); sessionStorage.removeItem("travels_booking_draft"); setForm((current) => ({ ...initialForm, vehicleCategory: current.vehicleCategory })); await loadCore(); setTab("history");
+      setMessage(response.data.message || "Booking created successfully."); sessionStorage.removeItem("travels_booking_draft"); setForm((current) => ({ ...initialForm, vehicleCategory: current.vehicleCategory })); await loadCore(false); setTab("history");
     } catch (err) { setError(err.response?.data?.message || "Unable to create booking."); } finally { setSubmitting(false); }
   };
 
@@ -396,7 +469,7 @@ const CustomerDashboard = () => {
       }
     };
     fetchOtp();
-    const timer = window.setInterval(fetchOtp, 5000);
+    const timer = window.setInterval(fetchOtp, 2000);
     return () => { alive = false; window.clearInterval(timer); };
   }, [activeTripId, activeTripStatus]);
 

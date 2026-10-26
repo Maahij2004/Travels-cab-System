@@ -2,6 +2,9 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
+const http = require("http");
+const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 
 dotenv.config();
 
@@ -38,8 +41,46 @@ const reportRoutes = require("./routes/reportRoutes");
 const dispatchRoutes = require("./routes/dispatchRoutes");
 const rideGuardRoutes = require("./routes/rideGuardRoutes");
 const { startDispatchWorker } = require("./services/dispatchService");
+const { setSocketIO } = require("./services/socketService");
 
 const app = express();
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: true, credentials: true },
+  transports: ["websocket", "polling"],
+});
+setSocketIO(io);
+
+io.use((socket, next) => {
+  try {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(new Error("Authentication required"));
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    socket.userId = decoded.id || decoded._id || decoded.userId;
+    socket.role = decoded.role || null;
+    if (!socket.userId) return next(new Error("Invalid authentication token"));
+    next();
+  } catch (error) { next(new Error("Invalid authentication token")); }
+});
+
+io.on("connection", async (socket) => {
+  socket.join(`user:${String(socket.userId)}`);
+  if (socket.role) {
+    socket.join(`role:${String(socket.role)}`);
+  }
+  if (socket.role === "driver") {
+    try {
+      const Driver = require("./models/driver");
+      const driverRecord = await Driver.findOne({ user: socket.userId }).select("_id").lean();
+      if (driverRecord?._id) {
+        socket.driverId = String(driverRecord._id);
+        socket.join(`driver:${String(driverRecord._id)}`);
+      }
+    } catch { /* driver room join error ignored */ }
+  }
+  socket.emit("dispatch:connected", { userId: socket.userId, driverId: socket.driverId, role: socket.role });
+});
+
 const PORT = process.env.PORT || 5000;
 
 // Database connection is awaited before the dispatch worker starts. This prevents
@@ -150,6 +191,25 @@ const startServer = async () => {
     }
   }
 
+  // Backfill the driver vehicle class for older fleets created before the
+  // vehicleCategory field existed. New dispatch decisions must never mix Mini,
+  // Sedan, SUV, Premium and Traveller driver pools.
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const Driver = require("./models/driver");
+      const VehicleCategory = require("./models/VehicleCategory");
+      const categories = await VehicleCategory.find({ isActive: true }).select("_id name").lean();
+      for (const category of categories) {
+        await Driver.updateMany(
+          { vehicleCategory: null, notes: { $regex: new RegExp(`Initial\\s+${category.name}\\s+driver\\s+fleet`, "i") } },
+          { $set: { vehicleCategory: category._id } }
+        );
+      }
+    } catch (error) {
+      console.warn(`[dispatch setup] Driver vehicle-category backfill skipped: ${error.message}`);
+    }
+  }
+
   if (mongoose.connection.readyState === 1 && process.env.NODE_ENV !== "production") {
     const Driver = require("./models/driver");
     const result = await Driver.updateMany(
@@ -161,7 +221,7 @@ const startServer = async () => {
     }
   }
 
-  app.listen(PORT, () => {
+  httpServer.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
     if (mongoose.connection.readyState === 1) startDispatchWorker();
     else console.warn("Dispatch worker not started because MongoDB is not connected.");
