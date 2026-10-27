@@ -202,14 +202,14 @@ const BookingPanel = () => {
       </div>
 
       {/* Date & Time & Passengers */}
-      <div className="grid grid-cols-3 gap-2 mb-4">
+      <div className="booking-date-time-grid grid grid-cols-3 gap-2 mb-4">
         <label className="bg-gray-50 p-2 rounded-xl border border-gray-200 block">
           <span className="text-[10px] font-bold text-gray-500 uppercase flex items-center gap-1">
             <CalendarDays size={12} className="text-red-600" /> Date
           </span>
           <input
             type="date"
-            className="w-full bg-transparent text-xs font-space font-semibold text-gray-900 focus:outline-none mt-0.5"
+            className="booking-date-time-input w-full bg-transparent text-xs font-space font-semibold text-gray-900 focus:outline-none mt-0.5"
             value={form.travelDate}
             min={new Date().toISOString().slice(0, 10)}
             onChange={(e) => update("travelDate", e.target.value)}
@@ -223,7 +223,7 @@ const BookingPanel = () => {
           </span>
           <input
             type="time"
-            className="w-full bg-transparent text-xs font-space font-semibold text-gray-900 focus:outline-none mt-0.5"
+            className="booking-date-time-input w-full bg-transparent text-xs font-space font-semibold text-gray-900 focus:outline-none mt-0.5"
             value={form.travelTime}
             onChange={(e) => update("travelTime", e.target.value)}
             required

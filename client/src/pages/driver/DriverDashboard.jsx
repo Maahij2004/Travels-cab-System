@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, RefreshCw, Send, ShieldAlert, Star, UserRound } from "lucide-react";
+import { AlertTriangle, Banknote, BellRing, CarFront, CheckCircle2, Clock3, LogOut, MapPin, Navigation, Receipt, RefreshCw, Send, ShieldAlert, Star, UserRound, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
 import { connectDispatchSocket } from "../../services/socket";
@@ -24,6 +24,11 @@ const DriverDashboard = () => {
   const [cashPayments, setCashPayments] = useState({});
   const [reliability, setReliability] = useState(null);
   const [rewards, setRewards] = useState(null);
+  const [paymentConfirmModal, setPaymentConfirmModal] = useState(null);
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const dismissedPaymentModalId = useRef(null);
+  const tripsRef = useRef(trips);
+  tripsRef.current = trips;
 
   const loadOffer = useCallback(async () => {
     // Never allow overlapping offer requests. On slower hosting, the previous
@@ -279,13 +284,35 @@ const DriverDashboard = () => {
       const prompt = payment.method === "Cash" && payment.status !== "Paid"
         ? `Confirm that you actually received ₹${amount} in cash from the customer. The trip will be completed after confirmation.`
         : `The system records this ${payment.method} payment as ${payment.status}. Have you checked and confirmed the payment status? The trip will be completed after confirmation.`;
-      if (!window.confirm(prompt)) return;
-      await api.patch(`/payments/${payment._id}/driver-confirm`);
+      setPaymentConfirmModal({
+        paymentId: payment._id,
+        amount,
+        method: payment.method,
+        status: payment.status,
+        prompt,
+      });
+      return;
       setMessage(`Payment status verified (${payment.method}). Trip completed and invoice generated.`);
       await load();
     } catch (err) {
       setError(err.response?.data?.message || "Unable to verify payment status.");
       await refreshPaymentStatuses();
+    }
+  };
+
+  const completePaymentConfirmation = async () => {
+    if (!paymentConfirmModal?.paymentId || confirmSubmitting) return;
+    try {
+      setConfirmSubmitting(true);
+      await api.patch(`/payments/${paymentConfirmModal.paymentId}/driver-confirm`);
+      setPaymentConfirmModal(null);
+      setMessage(`Payment status verified (${paymentConfirmModal.method}). Trip completed and invoice generated.`);
+      await load();
+    } catch (err) {
+      setError(err.response?.data?.message || "Unable to verify payment status.");
+      await refreshPaymentStatuses();
+    } finally {
+      setConfirmSubmitting(false);
     }
   };
 
@@ -347,6 +374,34 @@ const DriverDashboard = () => {
         <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">LIVE GPS</span><h2>Driver location</h2></div><Navigation size={20} /></div><p className="muted-text">Location updates every 10 seconds while sharing is enabled.</p><button className={`dashboard-primary ${locationSharing ? "dark-outline" : ""}`} onClick={toggleLocation}>{locationSharing ? "Stop location sharing" : "Start location sharing"}</button></section>
       </div>
       <section className="dashboard-card"><div className="card-heading"><div><span className="section-label">ASSIGNED TRIPS</span><h2>Today's work</h2><p className="muted-text" style={{marginTop:"6px"}}>Trips assigned automatically by dispatch appear here.</p></div><button className="icon-button" onClick={load}><RefreshCw size={16} /></button></div>{loading ? <p className="empty-state">Loading trips...</p> : trips.length === 0 ? <p className="empty-state">No assigned trips right now.</p> : <div className="driver-trip-list">{trips.map((trip) => { return <article className="driver-trip-card" key={trip._id}><div className="driver-trip-head"><div><strong>{trip.booking?.bookingId || "Trip"}</strong><span>{trip.booking?.pickupLocation || "Pickup"} → {trip.booking?.dropLocation || "Destination"}</span></div><span className="status-pill">{trip.status}</span></div><div className="trip-details"><div><MapPin size={15} /><span>Pickup</span><strong>{trip.booking?.pickupLocation}</strong></div><div><MapPin size={15} /><span>Drop</span><strong>{trip.booking?.dropLocation}</strong></div><div><CarFront size={15} /><span>Vehicle</span><strong>{trip.vehicle?.vehicleNumber || "Assigned vehicle"}</strong></div><div><Clock3 size={15} /><span>Time</span><strong>{trip.booking?.travelTime || "Scheduled"}</strong></div></div><div className="driver-trip-actions">{trip.status === "Scheduled" && <><button className="dashboard-primary compact" onClick={() => setStatus(trip._id,"Started")}><Navigation size={15} /> Generate pickup OTP</button><button className="dashboard-primary compact dark-outline" onClick={()=>setOtpTrip(trip)}>Enter customer OTP</button><button className="text-button" onClick={()=>cancelDriverTrip(trip._id)}>Cancel & re-dispatch</button></>}{trip.status === "Started" && <button className="dashboard-primary compact" onClick={() => setStatus(trip._id,"Customer Picked Up")}><CheckCircle2 size={15} /> Confirm customer picked up</button>}{trip.status === "Customer Picked Up" && <button className="dashboard-primary compact" onClick={() => setStatus(trip._id,"Ongoing")}>Mark Ongoing</button>}{trip.status === "Ongoing" && <button className="dashboard-primary compact" onClick={() => setStatus(trip._id,"Destination Reached")}><Navigation size={15}/> Destination reached</button>}{trip.status === "Destination Reached" && (() => { const payment = cashPayments[trip._id]; const amount = Number(trip.finalFare > 0 ? trip.finalFare : trip.estimatedFare || trip.booking?.estimatedFare || 0); const canVerify = payment && (payment.status === "Paid" || (payment.method === "Cash" && payment.status === "Pending")); const paymentLabel = payment ? `${payment.method} · ${payment.status}` : "Payment method not selected"; return <div className="driver-payment-verification"><div className="driver-payment-summary"><div><span className="section-label">FINAL FARE</span><strong>₹{amount.toLocaleString("en-IN", { maximumFractionDigits: 2 })}</strong></div><div><span className="section-label">PAYMENT STATUS</span><strong className={payment?.status === "Paid" ? "payment-status-paid" : "payment-status-pending"}>{paymentLabel}</strong></div></div><button className="dashboard-primary compact" disabled={!canVerify} onClick={() => confirmPaymentStatus(trip._id)}><CheckCircle2 size={15} />{!payment ? "Waiting for customer payment method" : payment.status === "Paid" || (payment.method === "Cash" && payment.status === "Pending") ? "Verify payment status & complete trip" : payment.status === "Failed" ? "Payment failed — retry required" : payment.status === "Refunded" ? "Payment refunded — contact admin" : "Waiting for online payment"}</button><button className="text-button" onClick={refreshPaymentStatuses}>Refresh payment status</button><span className="muted-text">Check the current payment record before completing this trip. The driver must verify every payment method.</span></div>; })()}{["Started", "Customer Picked Up", "Ongoing"].includes(trip.status) && <span className="gps-live"><span /> GPS sharing {locationSharing ? "on" : "off"}</span>}</div></article>; })}</div>}</section>
+      {paymentConfirmModal && <div className="driver-payment-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="payment-confirm-title">
+        <div className="driver-payment-confirm-modal">
+          <button className="driver-payment-modal-close" type="button" aria-label="Close payment confirmation" disabled={confirmSubmitting} onClick={() => setPaymentConfirmModal(null)}>
+            <X size={18} />
+          </button>
+          <div className={`driver-payment-modal-badge-icon ${paymentConfirmModal.method === "Cash" ? "cash" : ""}`}>
+            <Banknote size={30} />
+          </div>
+          <span className={`driver-payment-modal-tag ${paymentConfirmModal.method === "Cash" ? "cash" : "online"}`}>
+            {paymentConfirmModal.method === "Cash" ? "Cash payment" : "Online payment"}
+          </span>
+          <h2 id="payment-confirm-title" className="driver-payment-modal-title">Confirm payment received</h2>
+          <p className="driver-payment-modal-sub">{paymentConfirmModal.prompt}</p>
+          <div className="driver-payment-amount-box">
+            <div className="driver-payment-amount-label">Final fare</div>
+            <div className="driver-payment-amount-value">₹{paymentConfirmModal.amount}</div>
+            <div className={`driver-payment-method-pill ${paymentConfirmModal.status === "Paid" ? "paid" : "pending"}`}>
+              {paymentConfirmModal.method} · {paymentConfirmModal.status}
+            </div>
+          </div>
+          <button className="driver-payment-modal-btn-confirm" type="button" disabled={confirmSubmitting} onClick={completePaymentConfirmation}>
+            <CheckCircle2 size={17} /> {confirmSubmitting ? "Completing..." : "Confirm & complete trip"}
+          </button>
+          <button className="driver-payment-modal-btn-dismiss" type="button" disabled={confirmSubmitting} onClick={() => setPaymentConfirmModal(null)}>
+            Cancel
+          </button>
+        </div>
+      </div>}
       {otpTrip && <div className="booking-loading-overlay" role="dialog" aria-modal="true"><div className="booking-loading-modal"><span className="section-label">PICKUP VERIFICATION</span><h2>Enter customer OTP</h2><p>Ask the passenger for the 6-digit OTP shown in their Travels app.</p><input inputMode="numeric" maxLength="6" value={otpValue} onChange={(e)=>setOtpValue(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="6-digit OTP" style={{fontSize:"24px",letterSpacing:"8px",textAlign:"center"}} /><div style={{display:"flex",gap:"10px",marginTop:"12px"}}><button className="dashboard-primary" onClick={verifyOtp}>Verify & start trip</button><button className="dashboard-primary dark-outline" onClick={()=>{setOtpTrip(null);setOtpValue("")}}>Cancel</button></div></div></div>}
       <div className="driver-bottom-grid"><section className="dashboard-card"><div className="card-heading"><h2>Driver support</h2><Send size={18} /></div><textarea rows="4" value={ticketText} onChange={(e) => setTicketText(e.target.value)} placeholder="Describe a vehicle, passenger or trip issue" /><button className="dashboard-primary" onClick={sendTicket}>Send ticket</button></section><section className="dashboard-card sos-card"><ShieldAlert size={25} /><h2>Emergency</h2><p>Send an immediate alert to operations.</p><button className="danger-button" onClick={sendSOS}><AlertTriangle size={16} /> SOS</button></section></div>
     </main>
