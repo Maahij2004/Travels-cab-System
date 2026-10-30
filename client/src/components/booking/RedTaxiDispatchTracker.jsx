@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Clock3, MapPin, Navigation, Phone, RefreshCw, ShieldAlert, Sparkles, Star, UserCheck } from "lucide-react";
+import { CheckCircle2, Clock3, MapPin, Navigation, Phone, RefreshCw, ShieldAlert, Sparkles, Star, UserCheck, X } from "lucide-react";
 
 const STEPS = [
   ["Confirmed", "Your request is placed"],
@@ -159,14 +159,28 @@ export default function RedTaxiDispatchTracker({ trip, booking, pickupOtp, onSos
       </div>
 
       {showSosModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl p-6 max-w-md w-full border-2 border-red-600 shadow-2xl space-y-4">
-            <div className="flex items-center gap-3 text-red-600"><ShieldAlert size={32} /><div><h3 className="font-outfit text-xl font-black text-gray-900">Travels SOS</h3><p className="text-xs text-red-600 font-semibold">Immediate emergency support</p></div></div>
-            <p className="text-xs text-gray-600">Your live trip details can be shared with the Travels safety team when SOS is triggered.</p>
-            <a href="tel:112" className="w-full bg-red-600 text-white py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2"><Phone size={16} /> Call Emergency (112)</a>
-            <button onClick={() => { onSosTrigger?.(); setShowSosModal(false); }} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-sm">Notify Travels Control Room</button>
-            <button onClick={() => setShowSosModal(false)} className="w-full text-xs text-gray-500 font-semibold py-1">Cancel</button>
-          </div>
+        <div className="travels-sos-backdrop" role="dialog" aria-modal="true" aria-labelledby="travels-sos-title">
+          <section className="travels-sos-modal">
+            <button className="travels-sos-close" type="button" aria-label="Close SOS dialog" onClick={() => setShowSosModal(false)}><X size={18} /></button>
+
+            <div className="travels-sos-icon" aria-hidden="true"><ShieldAlert size={28} /></div>
+            <span className="travels-sos-eyebrow">RIDEGUARD · EMERGENCY</span>
+            <h3 id="travels-sos-title">Travels SOS</h3>
+            <p className="travels-sos-subtitle">Immediate emergency support</p>
+
+            <div className="travels-sos-message">
+              <ShieldAlert size={16} />
+              <p>Your live trip details can be shared with the Travels safety team when SOS is triggered.</p>
+            </div>
+
+            <div className="travels-sos-actions">
+              <a href="tel:112" className="travels-sos-emergency"><span className="travels-sos-action-icon"><Phone size={18} /></span><span><strong>Call Emergency</strong><small>Connect to 112</small></span><span className="travels-sos-arrow">›</span></a>
+              <button type="button" className="travels-sos-control" onClick={() => { onSosTrigger?.(); setShowSosModal(false); }}><span className="travels-sos-action-icon"><ShieldAlert size={18} /></span><span><strong>Alert Travels Safety Team</strong><small>Notify the control room</small></span><span className="travels-sos-arrow">›</span></button>
+            </div>
+
+            <button type="button" className="travels-sos-cancel" onClick={() => setShowSosModal(false)}>Cancel</button>
+            <small className="travels-sos-footer">Use SOS only when you need urgent assistance.</small>
+          </section>
         </div>
       )}
     </div>
