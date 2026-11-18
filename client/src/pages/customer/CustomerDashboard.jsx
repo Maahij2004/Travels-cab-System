@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, Clock3, CreditCard, LogOut, MessageCircle, Navigation, Phone, RefreshCw, Receipt, Send, Share2, ShieldAlert, ShieldCheck, LockKeyhole, Star, Wallet, X, AlertTriangle, Gift } from "lucide-react";
+import { CheckCircle2, CreditCard, LogOut, MessageCircle, Navigation, Phone, RefreshCw, Receipt, Send, Share2, ShieldAlert, ShieldCheck, LockKeyhole, Star, Wallet, X, AlertTriangle, Gift } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import api from "../../services/api";
 import { connectDispatchSocket } from "../../services/socket";
@@ -503,8 +503,8 @@ const CustomerDashboard = () => {
             <div className="wide"><ExactLocationPicker label="Drop location" placeholder="Search exact destination" value={form.dropLocation} selectedPlace={form.dropPlace} onChange={(value) => update("dropLocation", value)} onSelect={(place) => update("dropPlace", place)} /></div>
             <label className="wide" style={{display:"flex",alignItems:"center",gap:"10px",flexDirection:"row"}}><input type="checkbox" checked={bookForOther} onChange={(e)=>setBookForOther(e.target.checked)} /> Book for someone else</label>
             {bookForOther && <><label>Passenger name<input value={passengerName} onChange={(e)=>setPassengerName(e.target.value)} placeholder="Passenger full name" required /></label><label>Passenger phone<input value={passengerPhone} onChange={(e)=>setPassengerPhone(e.target.value)} placeholder="Passenger phone" required /></label></>}
-            <label>Travel date<div className="input-with-icon picker-field customer-picker-field"><CalendarDays size={16} /><input type="date" value={form.travelDate} min={new Date().toISOString().slice(0, 10)} onChange={(e) => update("travelDate", e.target.value)} onClick={(e) => e.currentTarget.showPicker?.()} required /></div></label>
-            <label>Travel time<div className="input-with-icon picker-field customer-picker-field"><Clock3 size={16} /><input type="time" value={form.travelTime} onChange={(e) => update("travelTime", e.target.value)} onClick={(e) => e.currentTarget.showPicker?.()} required /></div></label>
+            <label>Travel date<div className="input-with-icon picker-field customer-picker-field"><input type="date" value={form.travelDate} min={new Date().toISOString().slice(0, 10)} onChange={(e) => update("travelDate", e.target.value)} onClick={(e) => e.currentTarget.showPicker?.()} required /></div></label>
+            <label>Travel time<div className="input-with-icon picker-field customer-picker-field"><input type="time" value={form.travelTime} onChange={(e) => update("travelTime", e.target.value)} onClick={(e) => e.currentTarget.showPicker?.()} required /></div></label>
             <label>Passengers<select value={form.passengerCount} onChange={(e) => update("passengerCount", e.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{i + 1}</option>)}</select></label>
             <div className="route-summary-field"><span>Road distance</span><strong>{routeLoading ? "Calculating…" : route ? `${route.distanceKmExact} km` : "Select locations"}</strong><small>{route ? `${route.durationMinutes} min driving` : "Road distance calculated automatically"}</small></div>
             {fare && (
